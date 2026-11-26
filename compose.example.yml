@@ -1,0 +1,16 @@
+# Example compose file for ImagePipe.
+# Copy it to compose.yml and change every line marked CHANGE ME.
+#
+# Run a catalogue in the foreground so the live progress shows on screen:
+#   docker compose run --rm imagepipe catalogue --source photos
+
+services:
+  imagepipe:
+    build: .                                  # or: image: ghcr.io/<owner>/imagepipe:latest
+    container_name: imagepipe
+    environment:
+      TZ: Australia/Brisbane
+    volumes:
+      - ./config:/config:ro                   # holds imagepipe.yml
+      - /srv/imagepipe/data:/data             # CHANGE ME: manifest, logs, reports
+      - /srv/photos:/sources/photos:ro        # CHANGE ME: a source folder, always read-only

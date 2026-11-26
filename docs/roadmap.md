@@ -1,0 +1,14 @@
+# Roadmap
+
+ImagePipe is built in phases. Each phase is tested on the generated test set,
+then on a small real drop, before the next begins.
+
+| Phase | Contents | Status |
+|---|---|---|
+| 1 | Foundation (config, manifest, logging, progress, Apprise notifications, Docker, CI, docs) and **Catalogue** | Done (0.1) |
+| 2 | Feeder (copies from read-only sources, throttled by free space), stages 1-4 (inbox, ID check + fingerprint, PDFs via ScanSplitter, exact dupes), excluded folders + CSV log, cross-dataset copy-verify-remove, status web page | Next |
+| 3 | Stage 5 classify (SigLIP/CLIP, OCR, vision tiebreak), stage 6 similar dupes (rotation/crop aware, keeper scoring, metadata merge), RAW working copies, small-image recheck | Planned |
+| 4 | Stage 7 dates, stage 8 location (time neighbours, GeoCLIP, vision guess) | Planned |
+| 5 | Stage 9 A-Eye (with sidecar merge), stage 10 digiKam pause and release | Planned |
+| 6 | Stages 11-12 (snapshot, PhotoPrism + Immich), better-copy swap, PhotoPrism export and restore | Planned |
+| 7 | Re-processing the existing library end to end | Planned |
