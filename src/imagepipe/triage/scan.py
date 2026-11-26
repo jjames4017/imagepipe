@@ -3,7 +3,9 @@
 1. Scan    - walk the tree, recording every file's path, size and modified time
              (no total is known yet, so it shows a running count, rate and time).
 2. Compare - work out which files are new or changed since the last scan; files
-             that disappeared before being moved are marked missing.
+             that disappeared before being moved are marked missing. With
+             reread="problems" files that had a read problem are read again too;
+             with reread="all" every file still in the source is read again.
 3. Read    - for each new or changed file: real type from its contents, SHA-256,
              and the dates, GPS and titles used for naming. Shows %, rate and ETA.
 
@@ -38,6 +40,14 @@ CHUNK = 1 << 20
 READ_FIELDS = ("size", "mtime", "ext", "kind", "mime", "ext_mismatch", "sha256", "width", "height",
                "camera_make", "camera_model", "meta_date", "meta_date_src", "gps_lat", "gps_lon",
                "meta_title", "takeout_title", "encrypted", "catalogue_error")
+
+
+REREAD_CHOICES = ("problems", "all")
+REREAD_DETAIL = {
+    "changed": "changed on disk since last read",
+    "problem": "read again: had a read problem last time (--reread-problems)",
+    "all": "read again: every file re-read (--reread-all)",
+}
 
 
 class TriageAbort(Exception):
@@ -158,7 +168,7 @@ def _write_row(t: tdb.TriageDB, r: dict, info: dict, run_id: int) -> None:
         t.update(info["fid"], **cols, status=tdb.CATALOGUED, bucket=None, rule=None, dest_path=None,
                  companion_of=None, last_seen_run=run_id)
         t.action(run_id, t.get(info["fid"]), "re-read", from_path=info["current_path"],
-                 detail="changed on disk since last read")
+                 detail=REREAD_DETAIL.get(info.get("why"), REREAD_DETAIL["changed"]))
     else:
         names = ["source", "parent_id", "rel_path", "logical_path", "dir", "origin", "current_path",
                  *READ_FIELDS, "status", "first_seen_run", "last_seen_run", "updated_at"]
@@ -191,18 +201,25 @@ def read_items(t: tdb.TriageDB, pool, items: list[tuple], meta_of: dict, run_id:
     return errors
 
 
-def run_scan(cfg: Config, source: Source) -> dict:
+def run_scan(cfg: Config, source: Source, reread: str | None = None) -> dict:
+    """Scan one source. reread: None (new/changed only), "problems" or "all"."""
+    if reread not in (None, *REREAD_CHOICES):
+        raise ValueError(f"reread must be one of {REREAD_CHOICES} or None, not {reread!r}")
     tc = cfg.triage
     if not source.path.is_dir():
         raise TriageAbort(f"Source folder not found or not a folder: {source.path}")
     t = tdb.TriageDB(tc.database, cfg.tz, tc.reports_dir / "actions.csv")
     run_id = t.start_run("triage-scan", source.name)
     db = t.db
-    summary: dict = {"source": source.name, "run_id": run_id}
+    summary: dict = {"source": source.name, "run_id": run_id, "reread": reread}
     status = "failed"
     try:
         say(f"Triage scan: source '{source.name}' ({source.path})")
         say(f"Triage database: {tc.database}")
+        if reread == "problems":
+            say("Re-reading files that had a read problem last time, as well as new and changed files.")
+        elif reread == "all":
+            say("Re-reading every file still in the source (the unchanged check is skipped).")
 
         db.execute("DROP TABLE IF EXISTS temp.scan")
         db.execute("CREATE TEMP TABLE scan (rel_path TEXT PRIMARY KEY, size INTEGER, mtime REAL)")
@@ -238,12 +255,20 @@ def run_scan(cfg: Config, source: Source) -> dict:
             db.execute("DROP TABLE IF EXISTS temp.todo")
             db.execute(f"""
                 CREATE TEMP TABLE todo AS
-                SELECT s.rel_path, s.size, s.mtime, f.id AS fid, f.current_path AS current_path FROM temp.scan s
+                SELECT s.rel_path, s.size, s.mtime, f.id AS fid, f.current_path AS current_path,
+                       CASE WHEN f.id IS NULL THEN 'new'
+                            WHEN f.size != s.size OR f.mtime != s.mtime
+                                 OR f.status IN ('{tdb.MISSING}', '{tdb.CHANGED}') THEN 'changed'
+                            WHEN f.catalogue_error IS NOT NULL THEN 'problem'
+                            ELSE 'all' END AS why
+                FROM temp.scan s
                 LEFT JOIN files f ON f.source = :src AND f.parent_id = 0 AND f.rel_path = s.rel_path
                      AND f.status IN ({active})
                 WHERE f.id IS NULL OR f.size != s.size OR f.mtime != s.mtime
                    OR f.status IN ('{tdb.MISSING}', '{tdb.CHANGED}')
-            """, {"src": source.name})
+                   OR (:reread = 'problems' AND f.catalogue_error IS NOT NULL)
+                   OR :reread = 'all'
+            """, {"src": source.name, "reread": reread or ""})
             p.update(1, extra="marking files that disappeared")
             gone = db.execute(f"""
                 SELECT * FROM files WHERE source = :src AND parent_id = 0
@@ -259,9 +284,16 @@ def run_scan(cfg: Config, source: Source) -> dict:
             db.commit()
             p.update(1, extra="done")
         todo, todo_bytes = db.execute("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM temp.todo").fetchone()
-        summary.update(to_read=todo, to_read_bytes=todo_bytes, missing=len(gone))
-        say(f"{todo:,} new or changed files to read ({fmt_bytes(todo_bytes)}); "
-            f"{scanned - todo:,} unchanged; {len(gone):,} gone before being moved (marked missing).")
+        whys = dict(db.execute("SELECT why, COUNT(*) FROM temp.todo GROUP BY why").fetchall())
+        n_reread = whys.get("problem", 0) + whys.get("all", 0)
+        summary.update(to_read=todo, to_read_bytes=todo_bytes, missing=len(gone), reread_files=n_reread)
+        if reread:
+            say(f"{todo:,} files to read ({fmt_bytes(todo_bytes)}): {whys.get('new', 0):,} new, "
+                f"{whys.get('changed', 0):,} changed, {n_reread:,} read again; {scanned - todo:,} unchanged "
+                f"and skipped; {len(gone):,} gone before being moved (marked missing).")
+        else:
+            say(f"{todo:,} new or changed files to read ({fmt_bytes(todo_bytes)}); "
+                f"{scanned - todo:,} unchanged; {len(gone):,} gone before being moved (marked missing).")
 
         use_et = exiftool_ok()
         root = str(source.path)
@@ -284,7 +316,7 @@ def run_scan(cfg: Config, source: Source) -> dict:
                         meta_of[rel] = {
                             "fid": r["fid"], "source": source.name, "parent_id": 0, "rel_path": rel,
                             "logical_path": rel, "dir": os.path.dirname(rel), "origin": abs_path,
-                            "current_path": abs_path,
+                            "current_path": abs_path, "why": r["why"],
                         }
                         items.append((rel, to_fs(abs_path), os.path.basename(rel), r["size"], r["mtime"]))
                     errors += read_items(t, pool, items, meta_of, run_id, p, errors_before=errors)
@@ -298,6 +330,10 @@ def run_scan(cfg: Config, source: Source) -> dict:
         status = "interrupted" if interrupted else "finished"
         if interrupted:
             say("Interrupted. Everything read so far is saved; run the scan again to carry on.")
+            if reread == "all":
+                say("Note: running --reread-all again starts the re-read from the beginning.")
+        if n_reread:
+            say(f"{n_reread:,} files were read again and need planning again: run imagepipe triage plan.")
         return summary | {"status": status}
     except KeyboardInterrupt:
         status = "interrupted"

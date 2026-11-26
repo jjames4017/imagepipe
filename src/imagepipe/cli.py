@@ -137,7 +137,7 @@ def cmd_triage_scan(cfg, args) -> int:
     code = 0
     for source in sources:
         try:
-            result = run_scan(cfg, source)
+            result = run_scan(cfg, source, reread=args.reread)
         except TriageAbort as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             log.error(str(exc))
@@ -261,6 +261,11 @@ def build_parser() -> argparse.ArgumentParser:
     tsub = t.add_subparsers(dest="triage_command", required=True)
     ts = tsub.add_parser("scan", help="read-only inventory of the triage sources")
     ts.add_argument("--source", help="one triage source (default: all)")
+    rr = ts.add_mutually_exclusive_group()
+    rr.add_argument("--reread-problems", dest="reread", action="store_const", const="problems",
+                    help="also read again every file that had a read problem last time")
+    rr.add_argument("--reread-all", dest="reread", action="store_const", const="all",
+                    help="read every file again, ignoring the unchanged check")
     ts.set_defaults(func=cmd_triage_scan)
     tp = tsub.add_parser("plan", help="decide destinations and names; writes a dry-run report, moves nothing")
     tp.set_defaults(func=cmd_triage_plan)

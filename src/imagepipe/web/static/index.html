@@ -80,7 +80,12 @@
       <div class="card">
         <h2>Triage</h2>
         <p class="sub">Sort the triage sources: scan (read-only), plan (dry run), then apply (moves files).</p>
-        <div class="row"><span class="muted">Source</span><select id="t-source"></select></div>
+        <div class="row"><span class="muted">Source</span><select id="t-source"></select>
+          <span class="muted">Scan reads</span><select id="t-reread">
+            <option value="">new and changed files</option>
+            <option value="problems">+ re-read problem files</option>
+            <option value="all">everything again</option>
+          </select></div>
         <div class="row">
           <button class="b" data-job="triage-scan">Scan</button>
           <button class="b" data-job="triage-plan">Plan (dry run)</button>
@@ -235,7 +240,7 @@ async function loadMeta() {
 let lineCount = 0, lastJobId = null;
 $$("[data-job]").forEach(b => b.onclick = async () => {
   const kind = b.dataset.job, options = {};
-  if (kind.startsWith("triage-scan")) options.source = $("#t-source").value;
+  if (kind.startsWith("triage-scan")) { options.source = $("#t-source").value; options.reread = $("#t-reread").value; }
   if (["catalogue", "report", "export-csv"].includes(kind)) options.source = $("#c-source").value;
   if (kind === "catalogue") options.retry_errors = $("#c-retry").checked;
   if (kind === "triage-apply") {

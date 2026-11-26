@@ -565,3 +565,55 @@ def test_progress_problem_count_is_a_running_total(monkeypatch):
     p = Prog()
     assert scan_mod.read_items(None, Pool(), [], {}, 1, p, errors_before=30) == 1
     assert p.extra == "31 problems"
+
+
+# ------------------------------------------------- re-read problem files / everything
+def test_reread_problems_and_all(env):
+    import imagepipe.triage.scan as scan_mod
+    from imagepipe.cli import build_parser
+
+    cfg, vault = env
+    src = cfg.triage.source("file-cabinet")
+    assert run_scan(cfg, src)["status"] == "finished"
+    db = sqlite3.connect(cfg.triage.database)
+    # pretend an older version failed to read the letter
+    db.execute("UPDATE files SET catalogue_error='metadata: BadZipFile: old reader' "
+               "WHERE logical_path='letters/letter.docx'")
+    db.commit()
+    before = rows(cfg)["file-cabinet:letters/letter.docx"]
+
+    res = run_scan(cfg, src)  # a normal scan leaves it alone (unchanged)
+    assert res["to_read"] == 0 and rows(cfg)["file-cabinet:letters/letter.docx"]["catalogue_error"]
+
+    res = run_scan(cfg, src, reread="problems")
+    assert res["status"] == "finished" and res["to_read"] == 1 and res["reread_files"] == 1
+    after = rows(cfg)["file-cabinet:letters/letter.docx"]
+    assert after["catalogue_error"] is None and after["triage_id"] == before["triage_id"]
+    assert after["meta_title"] == "Letter to the Council"
+    detail = db.execute("SELECT detail FROM actions WHERE action='re-read' ORDER BY rowid DESC LIMIT 1").fetchone()[0]
+    assert detail == scan_mod.REREAD_DETAIL["problem"]
+
+    assert run_scan(cfg, src, reread="problems")["to_read"] == 0  # nothing left with a problem
+    n = len([k for k in rows(cfg) if k.startswith("file-cabinet:") and "::" not in k])
+    res = run_scan(cfg, src, reread="all")
+    assert res["to_read"] == res["reread_files"] == n == res["scanned"]
+    db.close()
+
+    with pytest.raises(ValueError):
+        run_scan(cfg, src, reread="bogus")
+    p = build_parser()
+    assert p.parse_args(["triage", "scan", "--reread-problems"]).reread == "problems"
+    assert p.parse_args(["triage", "scan", "--reread-all"]).reread == "all"
+    assert p.parse_args(["triage", "scan"]).reread is None
+    with pytest.raises(SystemExit):
+        p.parse_args(["triage", "scan", "--reread-all", "--reread-problems"])
+
+
+def test_web_scan_reread_argv():
+    from imagepipe.web.server import build_argv
+
+    assert build_argv("triage-scan", {}) == ["triage", "scan"]
+    assert build_argv("triage-scan", {"source": "photos", "reread": "problems"}) == [
+        "triage", "scan", "--source", "photos", "--reread-problems"]
+    assert build_argv("triage-scan", {"reread": "all"}) == ["triage", "scan", "--reread-all"]
+    assert build_argv("triage-scan", {"reread": "junk"}) == ["triage", "scan"]

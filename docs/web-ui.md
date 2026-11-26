@@ -13,7 +13,7 @@ There is **no login**: keep it on your LAN.
 
 | Page | What it does |
 |---|---|
-| Run | Buttons for catalogue, catalogue reports/CSV, triage scan, plan, apply (with an optional trial-run limit) and the notification test. Shows the running job's live progress (count, rate, ETA) and its output, with a Stop button. One job at a time |
+| Run | Buttons for catalogue, catalogue reports/CSV, triage scan (with a choice to re-read problem files or everything), plan, apply (with an optional trial-run limit) and the notification test. Shows the running job's live progress (count, rate, ETA) and its output, with a Stop button. One job at a time |
 | Status | The same as `imagepipe status` and `imagepipe triage status` |
 | Plan review | Every file the last triage plan placed - from, to, bucket, rule, date and smartname and where each came from - filterable by bucket and rule, and searchable. Nothing here has moved yet |
 | Actions | Everything triage has done, newest first, filterable and searchable (the same as `actions.csv`) |
