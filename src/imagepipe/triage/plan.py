@@ -28,7 +28,7 @@ from imagepipe.triage.kinds import classify
 from imagepipe.triage.meta import is_generic_title
 from imagepipe.triage.naming import (Geocoder, build_name, date_from_mtime, date_from_path,
                                      ddmmyy_in, descriptive_filename, is_default_clock, name_date_of, smartname,
-                                     with_original_name)
+                                     far_apart, with_original_name)
 
 log = logging.getLogger("imagepipe")
 
@@ -180,9 +180,7 @@ class Planner:
                     self._drift.setdefault((row[0] or "", row[1]), set()).add(int(row[2][:4]))
         return self._drift
 
-    def _suspect_exif(self, r, meta: str, src: str) -> bool:
-        if is_default_clock(meta):
-            return True
+    def _drifting(self, r, meta: str, src: str) -> bool:
         if src != "exif" or not r["camera_model"] or not meta[:4].isdigit():
             return False
         # a camera whose clock started at a default date and ran on from there
@@ -211,16 +209,28 @@ class Planner:
             short = ddmmyy_in(_stem(name), _office_year(r), tc.day_first)
             if short:
                 return short[0], "filename"
+        # A date from a camera whose clock may have drifted from its default (#35) is only
+        # replaced by another date more than a year away from it (#41).
+        drift = None
         for meta, src in candidates:
-            if self._suspect_exif(r, meta, src):
+            if is_default_clock(meta):
                 suspect = suspect or (name_date_of(meta), f"{src}-default-clock")
                 continue
+            if drift is None and self._drifting(r, meta, src):
+                drift = (name_date_of(meta), src, meta[:10])
+                continue
+            if drift and not far_apart(meta[:10], drift[2]):
+                return drift[0], drift[1]
             return name_date_of(meta), src
         found = date_from_path(name, folders, tc.day_first)
         if found and bucket == "sorted/ebooks" and found[1] == "filename" and len(found[0]) == 4:
             found = date_from_path("", folders, tc.day_first)  # a year in a book title isn't its date (#36)
         if found:
+            if drift and not far_apart(found[0][:10], drift[2]):
+                return drift[0], drift[1]
             return found
+        if drift:
+            return drift[0], f"{drift[1]}-default-clock"  # nothing to check it against: kept, but marked
         if suspect:
             return suspect  # better than the modified time
         return date_from_mtime(r["mtime"], self.cfg.tz), "mtime"

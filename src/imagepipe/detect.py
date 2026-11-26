@@ -34,7 +34,7 @@ ARCHIVE_EXT = {"zip", "rar", "7z", "gz", "tgz", "bz2", "xz", "tar", "cab"}
 SIDECAR_EXT = {"xmp", "aae", "thm", "xmp_original"}
 JUNK_NAMES = {
     ".ds_store", "thumbs.db", "ehthumbs.db", "ehthumbs_vista.db", "desktop.ini",
-    ".picasa.ini", "picasa.ini", ".localized", "zbthumbnail.info", ".nomedia",
+    ".picasa.ini", "picasa.ini", ".localized", "zbthumbnail.info", ".nomedia", "photothumb.db",
 }
 
 EXT_KIND: dict[str, str] = {}

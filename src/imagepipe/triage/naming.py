@@ -89,6 +89,27 @@ def is_default_clock(meta_date: str | None) -> bool:
     return year in DEFAULT_CLOCK_YEARS and (not hour or hour in DEFAULT_CLOCK_HOURS)
 
 
+def far_apart(date: str, exif_day: str) -> bool:
+    """True if `date` (YYYY, YYYY-MM or YYYY-MM-DD...) is more than a year from `exif_day` (YYYY-MM-DD)."""
+    from datetime import date as _d, timedelta
+
+    try:
+        e = _d.fromisoformat(exif_day[:10])
+        y = int(date[:4])
+        if len(date) >= 10:
+            start = end = _d.fromisoformat(date[:10])
+        elif len(date) >= 7:
+            m = int(date[5:7])
+            start = _d(y, m, 1)
+            end = (_d(y + (m == 12), m % 12 + 1, 1)) - timedelta(days=1)
+        else:
+            start, end = _d(y, 1, 1), _d(y, 12, 31)
+    except ValueError:
+        return False
+    year = timedelta(days=365)
+    return e < start - year or e > end + year
+
+
 def name_date_of(meta_date: str | None) -> str | None:
     """'2016-05-15 06:43:31' -> '2016-05-15_064331' (no time if 00:00:00 or none)."""
     if not meta_date:
@@ -329,9 +350,30 @@ def smartname(place: str | None, title: str | None, folders: list[str], stem: st
         if c and c.lower() not in seen:
             parts.append(c)
             seen.add(c.lower())
-    name = "-".join(parts) or clean_part(stem) or "file"
+    name = drop_repeats("-".join(parts)) or clean_part(stem) or "file"
     name = cut_at_hyphen(name, max_len)
     return name, "+".join(src for _t, src in pieces)
+
+
+def drop_repeats(name: str) -> str:
+    """A run of words repeated straight after itself appears once (#43):
+    Dallas-2-Dallas-2-003 -> Dallas-2-003, Dansey-Dansey-Census -> Dansey-Census.
+    Runs of numbers alone are left (Flat-1-1)."""
+    words = [w for w in name.split("-") if w]
+    changed = True
+    while changed:
+        changed = False
+        for k in range(len(words) // 2, 0, -1):
+            for i in range(len(words) - 2 * k + 1):
+                run = words[i:i + k]
+                if [w.lower() for w in run] == [w.lower() for w in words[i + k:i + 2 * k]] \
+                        and any(not w.isdigit() for w in run):
+                    del words[i + k:i + 2 * k]
+                    changed = True
+                    break
+            if changed:
+                break
+    return "-".join(words)
 
 
 def with_original_name(smart: str, stem: str, max_len: int = 80) -> str:
