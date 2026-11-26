@@ -369,7 +369,7 @@ class Planner:
                     stem = stem.replace(short[1], " ")  # the DDMMYY date is in the name's date part now
             ebook = bucket == "sorted/ebooks"
             smart, smart_src = smartname(place_of.get(r["id"]), title, folders, stem, tc.smartname_max_length,
-                                         keep_dates=ebook)
+                                         keep_dates=ebook, used_date=date)
             if bucket and bucket.startswith("quarantine/"):
                 smart = with_original_name(smart, _stem(name), tc.smartname_max_length)
                 smart_src += "+original-name"

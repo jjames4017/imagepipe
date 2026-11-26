@@ -881,7 +881,7 @@ def test_plan_uses_ddmmyy_and_drops_it_from_the_name(env):
     r = rows(cfg)["file-cabinet:Uni/2001 & 2002 papers/Psyc 121/103 Let Shakespeare 120301.txt"]
     assert (r["name_date"], r["date_source"]) == ("2001-03-12", "filename")
     assert "120301" not in r["smartname"] and not r["smartname"].startswith("and")
-    assert r["smartname"] == "papers-Psyc-121-103-Let-Shakespeare"
+    assert r["smartname"] == "2002-papers-Psyc-121-103-Let-Shakespeare"  # 2002 isn't the date used: kept (#47)
 
 
 # ------------------------------------------------- 0.3.8: #31-#33
@@ -1065,3 +1065,28 @@ def test_reread_ext_and_email_dates(env):
         "triage", "scan", "--reread-ext", "eml,msg"]
     with pytest.raises(ValueError):
         build_argv("triage-scan", {"reread": "ext", "reread_ext": ""})
+
+
+# ------------------------------------------------- 0.3.12: #47
+def test_dates_kept_in_name_when_not_the_one_used():
+    from imagepipe.triage.naming import meaningful_folder, smartname
+
+    assert smartname(None, None, ["Friends"], "Thelma Reynolds 1984", used_date="2015-09-16_164939")[0] == \
+        "Friends-Thelma-Reynolds-1984"
+    assert smartname(None, None, ["Friends"], "Thelma Reynolds 1984", used_date="1984")[0] == "Friends-Thelma-Reynolds"
+    assert meaningful_folder("Sandgate 2005", "2005-08-27_110734") == "Sandgate"
+    assert meaningful_folder("Camera Pics 19-03-2014", "2014-03-19") == "Camera Pics"
+    assert meaningful_folder("Camera Pics 19-03-2014", "2006-01-25_154458") == "Camera Pics 19-03-2014"
+    assert meaningful_folder("July 2014 Trip", "2014-07-03") == "Trip"
+    assert meaningful_folder("July 2014 Trip", "2015-01-01") == "July 2014 Trip"
+    assert meaningful_folder("Dallas Dec 2013.2", "2013-12-23_101749") == "Dallas .2"
+    assert meaningful_folder("2001 & 2002 papers") == "papers"  # no date given: all dates go, as before
+
+
+def test_plan_keeps_old_year_on_a_scanned_photo(env):
+    cfg, vault = env
+    build(vault / "file cabinet", {"Friends/Thelma Reynolds 1984.jpg": jpeg(date="2015:09:16 16:49:39")})
+    assert run_scan(cfg, cfg.triage.source("file-cabinet"))["status"] == "finished"
+    assert run_plan(cfg)["status"] == "finished"
+    r = rows(cfg)["file-cabinet:Friends/Thelma Reynolds 1984.jpg"]
+    assert r["name_date"] == "2015-09-16_164939" and r["smartname"].endswith("Thelma-Reynolds-1984")

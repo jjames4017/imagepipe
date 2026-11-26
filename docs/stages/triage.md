@@ -136,8 +136,11 @@ caption, Takeout description) or the meaningful folder names (up to two, e.g.
 `Fiji-day1`) plus the file name if it is descriptive. Camera names
 (`IMG_1234`, `DSC01234`, `PXL_...`), generic folders (`DCIM`, `100APPLE`,
 `Camera Roll`, `New Folder`, `batch_0042` ...) and dates (with any time
-straight after them) are left out, along with joining words left at either end
-once the dates are gone (`2001 & 2002 papers` -> `papers`). If nothing is left, the original file name
+straight after them) are left out when they agree with the date the new name
+carries, along with joining words left at either end once the dates are gone.
+A date that differs is kept, because it says something about the file: a
+scanned `Thelma Reynolds 1984.JPG` dated by its 2015 scan becomes
+`..._2015-09-16_..._Thelma-Reynolds-1984.jpg`. If nothing is left, the original file name
 is used.
 
 Smartnames contain only letters (accented letters and macrons kept, e.g. `ā`),
