@@ -29,7 +29,7 @@ folder named after the source:
 
 | Command | What it does | Changes files? |
 |---|---|---|
-| `imagepipe triage scan [--source NAME]` | Inventory: real type, SHA-256, dates, GPS, titles | No |
+| `imagepipe triage scan [--source NAME] [--reread-problems \| --reread-all]` | Inventory: real type, SHA-256, dates, GPS, titles | No |
 | `imagepipe triage plan` | Decides every destination and name; writes a dry-run report | No |
 | `imagepipe triage apply [--limit N]` | Carries out the plan | **Yes - moves files** |
 | `imagepipe triage status` | Counts by status and bucket, recent runs | No |
@@ -41,6 +41,23 @@ time; once the total is known, a percentage and ETA. A scan or apply that is
 stopped (Ctrl+C) loses nothing and carries on from where it stopped next time.
 
 `--limit N` stops after N files (or archives): use it for a trial run.
+
+### Reading files again
+
+A scan only reads files that are new or have changed (size or modified time)
+since the last scan; files already read keep their result. After upgrading to
+a version that reads some files better, read them again:
+
+- `--reread-problems` - also read again every file that had a read problem
+  last time. Quick: only those files are read.
+- `--reread-all` - read every file in the source again, ignoring the unchanged
+  check. Takes as long as the first scan.
+
+The two can't be used together. Only files still in the source (not yet moved
+by apply) are read. Files keep their pipeline ID; each one gets a `re-read`
+action saying why, and goes back to catalogued, so run `triage plan` again
+afterwards. In the web UI: Run tab -> Triage card -> **Scan reads** -> choose,
+then **Scan**.
 
 ## New names
 

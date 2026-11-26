@@ -55,7 +55,9 @@ def build_argv(job: str, opts: dict) -> list[str]:
     if job == "notify-test":
         return ["notify-test"]
     if job == "triage-scan":
-        return ["triage", "scan"] + (["--source", src] if src else [])
+        reread = str(opts.get("reread") or "").strip()
+        flag = {"problems": ["--reread-problems"], "all": ["--reread-all"]}.get(reread, [])
+        return ["triage", "scan"] + (["--source", src] if src else []) + flag
     if job == "triage-plan":
         return ["triage", "plan"]
     if job == "triage-apply":
