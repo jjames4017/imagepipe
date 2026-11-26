@@ -220,6 +220,40 @@ def cmd_triage_export(cfg, args) -> int:
     return 0
 
 
+def cmd_layered_find(cfg, args) -> int:
+    from imagepipe import layered
+
+    roots = [Path(p) for p in (args.path or [])]
+    for name in args.source or []:
+        roots.append(Path(cfg.source(name).path))
+    if not roots:
+        roots = [Path(s.path) for s in cfg.sources]
+    missing = [str(r) for r in roots if not r.is_dir()]
+    if missing:
+        print(f"Not a folder: {', '.join(missing)}", file=sys.stderr)
+        return 2
+    layered.find(roots, cfg.reports_dir / "layered", cfg.tz)
+    return 0
+
+
+def cmd_layered_render(cfg, args) -> int:
+    from imagepipe import layered
+
+    out = Path(args.out) if args.out else cfg.reports_dir / "layered" / "renders"
+    failed = 0
+    for f in args.files:
+        try:
+            dest, how = layered.render(f, out)
+            print(f"{f}\n  -> {dest}  ({how})")
+        except layered.MissingDependency as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        except Exception as exc:  # noqa: BLE001 - report and carry on with the next file
+            failed += 1
+            print(f"{f}\n  !! could not render: {type(exc).__name__}: {exc}", file=sys.stderr)
+    return 1 if failed else 0
+
+
 def cmd_serve(args) -> int:
     import os
 
@@ -283,6 +317,17 @@ def build_parser() -> argparse.ArgumentParser:
     te = tsub.add_parser("export-csv", help="write every file in the triage database to one CSV")
     te.add_argument("--output")
     te.set_defaults(func=cmd_triage_export)
+
+    lay = sub.add_parser("layered", help="layered TIFFs and Photoshop files: review list, working copies")
+    lsub = lay.add_subparsers(dest="layered_command", required=True)
+    lf = lsub.add_parser("find", help="list PSD/PSB files and layered or unreadable TIFFs for review (read-only)")
+    lf.add_argument("--source", action="append", help="a catalogue source (repeatable; default: all)")
+    lf.add_argument("--path", action="append", help="any folder to search instead (repeatable)")
+    lf.set_defaults(func=cmd_layered_find)
+    lr = lsub.add_parser("render", help="make a full-resolution JPEG/PNG working copy of PSD/PSB/TIFF files")
+    lr.add_argument("files", nargs="+")
+    lr.add_argument("--out", help="folder for the working copies (default: <reports_dir>/layered/renders)")
+    lr.set_defaults(func=cmd_layered_render)
     return p
 
 
