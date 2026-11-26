@@ -216,6 +216,16 @@ def cmd_triage_export(cfg, args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    import os
+
+    from imagepipe.config import DEFAULT_CONFIG_PATH
+    from imagepipe.web.server import serve
+
+    path = Path(args.config or os.environ.get("IMAGEPIPE_CONFIG") or DEFAULT_CONFIG_PATH)
+    return serve(path, args.host, args.port)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="imagepipe", description="ImagePipe photo pipeline")
     p.add_argument("--version", action="version", version=f"imagepipe {__version__}")
@@ -242,6 +252,11 @@ def build_parser() -> argparse.ArgumentParser:
     n = sub.add_parser("notify-test", help="send a test notification through Apprise")
     n.set_defaults(func=cmd_notify_test)
 
+    w = sub.add_parser("serve", help="run the web UI (settings, jobs, reports)")
+    w.add_argument("--host", default="0.0.0.0", help="address to listen on (default: all)")
+    w.add_argument("--port", type=int, default=8020, help="port (default: 8020)")
+    w.set_defaults(func=None)
+
     t = sub.add_parser("triage", help="sort mixed folder trees: scan, plan (dry run), apply")
     tsub = t.add_subparsers(dest="triage_command", required=True)
     ts = tsub.add_parser("scan", help="read-only inventory of the triage sources")
@@ -262,6 +277,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "serve":  # starts even with a broken config, so it can be fixed in the UI
+        return cmd_serve(args)
     try:
         cfg = load_config(args.config)
         _setup_logging(cfg)

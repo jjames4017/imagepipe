@@ -7,6 +7,7 @@ then on a small real drop, before the next begins.
 |---|---|---|
 | 1 | Foundation (config, manifest, logging, progress, Apprise notifications, Docker, CI, docs) and **Catalogue** | Done (0.1) |
 | 1b | **Triage**: sort mixed folder trees (photos, documents, archives, everything else) into ImagePipe's inbox, a document staging folder, sorted type folders or quarantine, with renaming, archive extraction and a full action log | Done (0.2) |
+| 1c | **Web UI**: settings form and raw YAML editor, run every command with live progress and stop, plan review, action log, reports | Done (0.3) |
 | 2 | Feeder (copies from read-only sources, throttled by free space; extracts image files from zip archives, recording `<zip> → <member>` as the source), Google Takeout JSON reader (restores dates and GPS kept only in Takeout's `.json` files), stages 1-4 (inbox, ID check + fingerprint, PDFs via ScanSplitter, exact dupes), excluded folders + CSV log, cross-dataset copy-verify-remove, status web page | Next |
 | 3 | Stage 5 classify (SigLIP/CLIP, OCR, vision tiebreak), stage 6 similar dupes (rotation/crop aware, keeper scoring, metadata merge), RAW working copies, small-image recheck | Planned |
 | 4 | Stage 7 dates, stage 8 location (time neighbours, GeoCLIP, vision guess) | Planned |

@@ -17,5 +17,7 @@ ENV IMAGEPIPE_CONFIG=/config/imagepipe.yml \
     PYTHONUNBUFFERED=1 \
     SQLITE_TMPDIR=/data/tmp
 
+EXPOSE 8020
+
 ENTRYPOINT ["tini", "--", "imagepipe"]
 CMD ["status"]

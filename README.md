@@ -27,6 +27,9 @@ docker compose build
 docker compose run --rm imagepipe catalogue --source photos
 ```
 
+A web page for settings, running jobs and reviewing results: `imagepipe serve`,
+then open port 8020 - see [docs/web-ui.md](docs/web-ui.md).
+
 Full documentation is in [`docs/`](docs/index.md) (build it with `mkdocs serve`).
 
 ## Licence
