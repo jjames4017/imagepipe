@@ -98,7 +98,12 @@ A compact `YYYYMMDDHHMMSS` timestamp in a file name
 (`DVR_20121124004613.mp4`) counts as a date and time. A 6-digit `DDMMYY`
 number (`Shakespeare 120301`) counts as a date only when its year is within
 one year of a year in the folder names, since 6-digit numbers are often
-counters; when used it is removed from the smartname.
+counters; when used it is removed from the smartname. For Office files it also
+counts when it is within one year of the Office created date.
+
+URL-encoded names (`Cliff%20Edwards`) are decoded before dates and smartnames
+are worked out; the folders on disk are not changed. Generic titles
+(`Track 23`, `Chapter 4`, `Untitled`) are never used as smartnames.
 
 When the date comes from inside the file, a sidecar or the file name and a time
 is known, the time is added: `2016-05-15_064331` (or `_0643` without seconds).
@@ -262,7 +267,7 @@ The bucket for each file, in order:
 | `.DS_Store`, `Thumbs.db`, `desktop.ini`, `._*` and similar | `quarantine/system-junk` |
 | can't be read | `quarantine/corrupt` |
 | extension listed in `bucket_overrides` | as configured |
-| `.tmp`, `.crdownload`, `.asd`, `.wbk` | `quarantine/system-junk` |
+| `.tmp`, `.crdownload`, `.asd`, `.wbk`, and Office lock files (`~$...`) | `quarantine/system-junk` |
 | the extension promises an image/RAW/video/audio/PDF but the contents are text, HTML or unknown | `quarantine/corrupt` |
 | image or RAW | `imagepipe` |
 | XMP/AAE/THM sidecar, Takeout JSON | with its photo; `imagepipe` if its photo isn't found |

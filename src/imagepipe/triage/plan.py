@@ -18,12 +18,14 @@ import re
 import sys
 import time
 from pathlib import Path
+from urllib.parse import unquote
 
 from imagepipe.config import Config
 from imagepipe.ids import id_from_name, new_id
 from imagepipe.progress import Progress
 from imagepipe.triage import db as tdb
 from imagepipe.triage.kinds import classify
+from imagepipe.triage.meta import is_generic_title
 from imagepipe.triage.naming import (Geocoder, build_name, date_from_mtime, date_from_path,
                                      ddmmyy_in, descriptive_filename, is_default_clock, name_date_of, smartname)
 
@@ -71,6 +73,20 @@ def _dest_dir(tc, source_folder: str, bucket: str, logical_dir: str) -> Path:
         base = tc.destinations[bucket]
     parts = [p for p in logical_dir.split("/") if p] if logical_dir else []
     return base.joinpath(source_folder, *parts)
+
+
+def _decoded(text: str) -> str:
+    """URL-decode %xx in a name (Cliff%20Edwards -> Cliff Edwards); anything else unchanged."""
+    if not re.search(r"%[0-9A-Fa-f]{2}", text):
+        return text
+    try:
+        return unquote(text, errors="strict")
+    except UnicodeDecodeError:
+        return text
+
+
+def _office_year(r) -> list[str]:
+    return [r["meta_date"][:4]] if r["meta_date_src"] == "office" and r["meta_date"] else []
 
 
 WEB_BUCKET = "sorted/web-pages"
@@ -169,6 +185,10 @@ class Planner:
             found = date_from_path(name, [], tc.day_first)  # the file name only, not its folders
             if found:
                 return found
+            # DDMMYY in the name, if within a year of the Office date (#33)
+            short = ddmmyy_in(_stem(name), _office_year(r), tc.day_first)
+            if short:
+                return short[0], "filename"
         for meta, src in candidates:
             if is_default_clock(meta):
                 suspect = suspect or (name_date_of(meta), f"{src}-default-clock")
@@ -296,18 +316,21 @@ class Planner:
         for r in primaries:
             bucket, rule = decided[r["id"]]
             pid = self._pick_id(r)
-            name = os.path.basename(r["rel_path"])
-            folders = [p for p in r["dir"].split("/") if p]
+            # %20 and friends decoded for reading dates and names; folders on disk are unchanged (#32)
+            name = _decoded(os.path.basename(r["rel_path"]))
+            folders = [_decoded(p) for p in r["dir"].split("/") if p]
             date, src = self._pick_date(r, name, folders, side_meta.get(r["id"], []))
             title = r["meta_title"] or next((s["meta_title"] for s in side_meta.get(r["id"], [])
                                              if s["meta_title"]), None)
+            if title and is_generic_title(title):
+                title = None
             if r["meta_date_src"] == "office" and descriptive_filename(_stem(name)):
                 # an Office title is often the template's ("Risk Assessment Register"): a
                 # descriptive file name says more about this file (#23)
                 title = None
             stem = _stem(name)
             if src == "filename":
-                short = ddmmyy_in(stem, folders, tc.day_first)
+                short = ddmmyy_in(stem, folders + _office_year(r), tc.day_first)
                 if short and date == short[0]:
                     stem = stem.replace(short[1], " ")  # the DDMMYY date is in the name's date part now
             smart, smart_src = smartname(place_of.get(r["id"]), title, folders, stem, tc.smartname_max_length)

@@ -882,3 +882,45 @@ def test_plan_uses_ddmmyy_and_drops_it_from_the_name(env):
     assert (r["name_date"], r["date_source"]) == ("2001-03-12", "filename")
     assert "120301" not in r["smartname"] and not r["smartname"].startswith("and")
     assert r["smartname"] == "papers-Psyc-121-103-Let-Shakespeare"
+
+
+# ------------------------------------------------- 0.3.8: #31-#33
+def test_office_lock_files_and_generic_titles():
+    from imagepipe.triage.kinds import classify
+    from imagepipe.triage.meta import is_generic_title
+
+    lock = _row(mime="application/vnd.openxmlformats", ext="pptx", rel_path="Meetings/~$Regional Councils 2.pptx")
+    assert classify(lock, {}) == ("quarantine/system-junk", "office-lock-file")
+    real = _row(mime="application/vnd.openxmlformats", ext="pptx", rel_path="Meetings/Regional Councils 2.pptx")
+    assert classify(real, {})[0] == "docupipe"
+    for t in ("Track 23", "track23", "Audio Track 4", "Chapter 7", "Untitled", "title"):
+        assert is_generic_title(t), t
+    for t in ("Paddlin Madelin Home", "Track and field results", "Chapter of my life"):
+        assert not is_generic_title(t), t
+
+
+def test_plan_url_encoded_names_and_office_ddmmyy(env):
+    import sqlite3 as _sq
+
+    cfg, vault = env
+    build(vault / "file cabinet", {
+        "My Music/Cliff%20Edwards%20-%20Glendale%20-%2023%20-%20Paddlin'%20Madelin'%20Home[1].txt": b"x\n",
+        "Weekly meetings/Minutes_ Project Kickoff meeting_310516(ui6Y).docx":
+            docx("Agenda Template", "2015-11-04T04:55:00Z"),
+        "Weekly meetings/Minutes 310599.docx": docx("Agenda Template", "2015-11-04T04:55:00Z"),
+    })
+    assert run_scan(cfg, cfg.triage.source("file-cabinet"))["status"] == "finished"
+    db = _sq.connect(cfg.triage.database)  # as if an audio tag had said "Track 23"
+    db.execute("UPDATE files SET meta_title='Track 23' WHERE rel_path LIKE 'My Music/Cliff%'")
+    db.commit()
+    db.close()
+    assert run_plan(cfg)["status"] == "finished"
+    r = rows(cfg)
+    song = next(v for k, v in r.items() if "Cliff" in k)
+    assert "2023" not in song["name_date"] and song["date_source"] != "filename"
+    assert song["smartname"].endswith("Cliff-Edwards-Glendale-23-Paddlin-Madelin-Home-1"), song["smartname"]
+    mins = r["file-cabinet:Weekly meetings/Minutes_ Project Kickoff meeting_310516(ui6Y).docx"]
+    assert (mins["name_date"], mins["date_source"]) == ("2016-05-31", "filename")
+    assert "310516" not in mins["smartname"]
+    far = r["file-cabinet:Weekly meetings/Minutes 310599.docx"]  # 1999 is nowhere near the 2015 Office date
+    assert far["date_source"] == "office" and far["name_date"].startswith("2015-11-04")

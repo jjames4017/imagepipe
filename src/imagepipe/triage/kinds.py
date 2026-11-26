@@ -81,6 +81,12 @@ def classify(row, overrides: dict[str, str]) -> tuple[str, str]:
 
     if kind == "empty":
         return "quarantine/zero-byte", "empty-file"
+    try:
+        name = (row["rel_path"] or "").rsplit("/", 1)[-1]
+    except (KeyError, IndexError):
+        name = ""
+    if name.startswith("~$"):  # Office owner/lock file beside an open document (#31)
+        return "quarantine/system-junk", "office-lock-file"
     if kind == "junk":
         return "quarantine/system-junk", "system-junk-file"
     if err.startswith("read:"):
