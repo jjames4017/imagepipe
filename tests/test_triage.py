@@ -288,7 +288,7 @@ def test_plan_moves_nothing_and_names_files(env):
 
     letter = r["file-cabinet:letters/letter.docx"]
     assert letter["bucket"] == "docupipe" and letter["name_date"] == "2016-03-04_050607"
-    assert letter["smartname"] == "Letter-to-the-Council"
+    assert letter["smartname"] == "letters-letter"  # a descriptive file name beats the Office title (#23)
     assert Path(letter["dest_path"]).parent == vault / "docupipe" / "file cabinet" / "letters"
     receipt = r["file-cabinet:Tax/2019/receipt.pdf"]
     assert receipt["bucket"] == "docupipe" and receipt["smartname"] == "Tax-receipt"
@@ -661,7 +661,7 @@ def test_smartname_characters_and_cut():
     assert clean_part("logo_top (3)") == "logo-top-3"
     assert clean_part("Letters & Envelopes") == "Letters-and-Envelopes"
     assert clean_part("Ann Dansey, Bill & Reima Hall 2") == "Ann-Dansey-Bill-and-Reima-Hall-2"
-    assert clean_part("picnan's94thbirthday") == "picnan-s94thbirthday"
+    assert clean_part("picnan's94thbirthday") == "picnans94thbirthday"
     assert clean_part("Andrew Kusabs (Andrew@kusabs.co.nz)") == "Andrew-Kusabs-Andrew-kusabs-co-nz"
     assert clean_part("Māori whakapapa – Ōtaki [draft] #2!") == "Māori-whakapapa-Ōtaki-draft-2"
     assert clean_part("bad\udc80bytes") == "bad-bytes"
@@ -801,3 +801,49 @@ def test_geocoder_message_is_imagepipes_own(capfd):
     out = capfd.readouterr()
     assert "Loading formatted geocoded file" not in out.out + out.err
     assert out.err.count("Loading place names (offline)... done") == 1
+
+
+# ------------------------------------------------- 0.3.6: #23-#26
+def test_14_digit_timestamps_and_apostrophes():
+    from imagepipe.triage.naming import clean_part, date_from_path, descriptive_filename
+
+    assert date_from_path("DVR_Mill Street_20121124004613_20121124004642_1607059_0001.mp4", []) == (
+        "2012-11-24_004613", "filename")
+    assert date_from_path("cam_20121124256199.mp4", []) is None  # hour 25: not a timestamp
+    assert "004613" not in (descriptive_filename("DVR_Mill Street_20121124004613_x") or "")
+    assert clean_part("If you’re looking") == "If-youre-looking"
+    assert clean_part("Tom‘s ʼbestʼ") == "Toms-best"
+
+
+def test_default_clock_dates():
+    from imagepipe.triage.naming import is_default_clock
+
+    for d in ("2006-01-01 12:00:22", "2000-01-01 00:00:05", "2004-01-01 01:59:00", "1980-01-01", "2010-01-01 12:30:00"):
+        assert is_default_clock(d), d
+    for d in ("2006-01-02 12:00:22", "2014-01-01 12:00:00", "2006-01-01 18:30:00", "2006-02-01 00:00:00", None, ""):
+        assert not is_default_clock(d), d
+
+
+def test_plan_date_choices(env):
+    cfg, vault = env
+    build(vault / "file cabinet", {
+        "Reviewed/2010-01-09 Reviewed Keep/100_0907.jpg": jpeg(date="2006:01:01 12:00:22"),
+        "Unsorted/100_0908.jpg": jpeg(date="2006:01:01 12:00:22"),
+        "Unsorted/New Year.jpg": jpeg(date="2019:01:01 00:05:00"),
+        "Work/BCP DVCR_MASTER 17 04 2020_FINAL.docx": docx("Risk Assessment Register", "2006-05-12T00:59:57Z"),
+        "Work/Q.docx": docx("Quarterly Board Report", "2018-03-04T05:06:07Z"),
+    })
+    assert run_scan(cfg, cfg.triage.source("file-cabinet"))["status"] == "finished"
+    assert run_plan(cfg)["status"] == "finished"
+    r = rows(cfg)
+    reviewed = r["file-cabinet:Reviewed/2010-01-09 Reviewed Keep/100_0907.jpg"]
+    assert (reviewed["name_date"], reviewed["date_source"]) == ("2010-01-09", "folder")  # camera clock not set
+    lone = r["file-cabinet:Unsorted/100_0908.jpg"]
+    assert (lone["name_date"], lone["date_source"]) == ("2006-01-01_120022", "exif-default-clock")  # nothing better
+    ny = r["file-cabinet:Unsorted/New Year.jpg"]
+    assert (ny["name_date"], ny["date_source"]) == ("2019-01-01_000500", "exif")  # not a default year
+    bcp = r["file-cabinet:Work/BCP DVCR_MASTER 17 04 2020_FINAL.docx"]
+    assert (bcp["name_date"], bcp["date_source"]) == ("2020-04-17", "filename")
+    assert "Risk" not in bcp["smartname"] and "BCP-DVCR-MASTER" in bcp["smartname"]
+    q = r["file-cabinet:Work/Q.docx"]  # file name not descriptive: the Office title and date are used
+    assert q["smartname"].endswith("Quarterly-Board-Report") and q["date_source"] == "office"

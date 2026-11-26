@@ -69,6 +69,24 @@ def _valid(y: int, m: int = 1, d: int = 1) -> bool:
 _TIME_AFTER = r"(?:[-_. T]?([01]\d|2[0-3])[-_.:]?([0-5]\d)(?:[-_.:]?([0-5]\d))?(?:\d{1,3})?(?!\d))"
 
 
+# Dates cameras show when their clock was never set (#25): 1 January of these years,
+# at around midnight or noon (or with no time at all).
+DEFAULT_CLOCK_YEARS = {1970, 1980, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010}
+DEFAULT_CLOCK_HOURS = {"00", "01", "12"}
+
+
+def is_default_clock(meta_date: str | None) -> bool:
+    """True for an EXIF-style date that is probably a camera's unset clock, e.g. 2006-01-01 12:00:22."""
+    if not meta_date or len(meta_date) < 10 or meta_date[4:10] != "-01-01":
+        return False
+    try:
+        year = int(meta_date[:4])
+    except ValueError:
+        return False
+    hour = meta_date[11:13]
+    return year in DEFAULT_CLOCK_YEARS and (not hour or hour in DEFAULT_CLOCK_HOURS)
+
+
 def name_date_of(meta_date: str | None) -> str | None:
     """'2016-05-15 06:43:31' -> '2016-05-15_064331' (no time if 00:00:00 or none)."""
     if not meta_date:
@@ -108,6 +126,11 @@ def time_after_date(text: str) -> str | None:
 def date_in_text(text: str, day_first: bool = True) -> str | None:
     """Find a date in a file or folder name. Returns YYYY-MM-DD, YYYY-MM or YYYY."""
     t = text
+    # YYYYMMDDHHMMSS in one run (e.g. DVR_..._20121124004613_...)
+    for m in re.finditer(r"(?<!\d)((?:19|20)\d{2})(\d{2})(\d{2})(?:[01]\d|2[0-3])[0-5]\d[0-5]\d(?!\d)", t):
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if _valid(y, mo, d):
+            return f"{y:04d}-{mo:02d}-{d:02d}"
     # YYYY-MM-DD, YYYY_MM_DD, YYYY.MM.DD, YYYYMMDD (e.g. IMG_20140712_101010, PXL_20210101...)
     for m in re.finditer(r"(?<!\d)((?:19|20)\d{2})[-_. ]?(\d{2})[-_. ]?(\d{2})(?!\d)", t):
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
@@ -180,6 +203,7 @@ def clean_part(text: str) -> str:
     """
     text = unicodedata.normalize("NFC", text)
     text = text.replace("&", " and ")
+    text = re.sub(r"['\u2018\u2019\u02bc`\u00b4]", "", text)  # apostrophes join the word: you're -> youre
     text = "".join(ch if (ch.isalnum() or ch == "-") else " " for ch in text)
     text = re.sub(r"[\s-]+", "-", text.strip())
     return text.strip("-")
