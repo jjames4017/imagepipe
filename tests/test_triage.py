@@ -847,3 +847,38 @@ def test_plan_date_choices(env):
     assert "Risk" not in bcp["smartname"] and "BCP-DVCR-MASTER" in bcp["smartname"]
     q = r["file-cabinet:Work/Q.docx"]  # file name not descriptive: the Office title and date are used
     assert q["smartname"].endswith("Quarterly-Board-Report") and q["date_source"] == "office"
+
+
+# ------------------------------------------------- 0.3.7: #28, #29
+def test_joining_words_trimmed_after_dates():
+    from imagepipe.triage.naming import meaningful_folder
+
+    assert meaningful_folder("2001 & 2002 papers") == "papers"
+    assert meaningful_folder("2010 - Holiday") == "Holiday"
+    assert meaningful_folder("Jan to March 2005") is None
+    assert meaningful_folder("Photos 2004 and 2005 Fiji") == "Photos and Fiji"  # middle words stay
+    assert meaningful_folder("Bill & Reima 2004") == "Bill & Reima"
+
+
+def test_ddmmyy_only_with_a_matching_folder_year():
+    from imagepipe.triage.naming import date_from_path, ddmmyy_in
+
+    folders = ["Victoria Studies", "2001 & 2002 papers", "Psyc 121"]
+    assert date_from_path("103 Let Shakespeare 120301.mht", folders) == ("2001-03-12", "filename")
+    assert ddmmyy_in("103 Let Shakespeare 120301", folders) == ("2001-03-12", "120301")
+    assert date_from_path("Track 120301.mp3", ["Music"]) is None  # no folder year: a counter
+    assert date_from_path("Track 120301.mp3", ["Music 2015"]) == ("2015", "folder")  # year too far off
+    assert date_from_path("x 310299.doc", ["1999"]) == ("1999", "folder")  # 31/02 is not a date
+    assert date_from_path("Lecture 050401.htm", ["2001"]) == ("2001-04-05", "filename")
+    assert date_from_path("Scan 2001-04-05 120301.pdf", ["2001"]) == ("2001-04-05_120301", "filename")  # full date wins; digits after it are a time
+
+
+def test_plan_uses_ddmmyy_and_drops_it_from_the_name(env):
+    cfg, vault = env
+    build(vault / "file cabinet", {"Uni/2001 & 2002 papers/Psyc 121/103 Let Shakespeare 120301.txt": b"notes\n"})
+    assert run_scan(cfg, cfg.triage.source("file-cabinet"))["status"] == "finished"
+    assert run_plan(cfg)["status"] == "finished"
+    r = rows(cfg)["file-cabinet:Uni/2001 & 2002 papers/Psyc 121/103 Let Shakespeare 120301.txt"]
+    assert (r["name_date"], r["date_source"]) == ("2001-03-12", "filename")
+    assert "120301" not in r["smartname"] and not r["smartname"].startswith("and")
+    assert r["smartname"] == "papers-Psyc-121-103-Let-Shakespeare"

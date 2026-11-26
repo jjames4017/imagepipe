@@ -163,6 +163,31 @@ def date_in_text(text: str, day_first: bool = True) -> str | None:
     return None
 
 
+def _folder_years(folders: list[str]) -> set[int]:
+    years = set()
+    for f in folders:
+        years.update(int(y) for y in re.findall(r"(?<!\d)((?:19|20)\d{2})(?!\d)", f))
+    return years
+
+
+def ddmmyy_in(stem: str, folders: list[str], day_first: bool = True) -> tuple[str, str] | None:
+    """(YYYY-MM-DD, the 6 digits) for a DDMMYY number in a file name (#29).
+
+    Only when it is a valid date whose year is within one year of a year in the
+    folder names: on their own, 6-digit numbers are as likely to be counters.
+    """
+    years = _folder_years(folders)
+    if not years:
+        return None
+    for m in re.finditer(r"(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)", stem):
+        a, b, yy = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        d, mo = (a, b) if day_first else (b, a)
+        y = 2000 + yy if 2000 + yy <= datetime.now().year + 1 else 1900 + yy
+        if _valid(y, mo, d) and any(abs(y - fy) <= 1 for fy in years):
+            return f"{y:04d}-{mo:02d}-{d:02d}", m.group(0)
+    return None
+
+
 def date_from_path(filename: str, folders: list[str], day_first: bool = True) -> tuple[str, str] | None:
     """(date, source) from the file name, then folders deepest first.
 
@@ -170,6 +195,10 @@ def date_from_path(filename: str, folders: list[str], day_first: bool = True) ->
     """
     stem = filename.rsplit(".", 1)[0] if "." in filename.lstrip(".") else filename
     found = date_in_text(stem, day_first)
+    if not found or len(found) < 10:
+        short = ddmmyy_in(stem, folders, day_first)
+        if short:
+            return short[0], "filename"
     if found:
         tm = time_after_date(stem) if len(found) == 10 else None
         if tm and re.sub(r"\D", "", found) in re.sub(r"\D", "", stem):
@@ -225,7 +254,12 @@ def _strip_dates(text: str) -> str:
     t = re.sub(r"(?<!\d)\d{1,2}[-_. /]\d{1,2}[-_. /](?:19|20)\d{2}(?!\d)", " ", t)
     t = re.sub(r"(?<!\d)(?:19|20)\d{2}(?:[-_.]\d{2})?(?!\d)", " ", t)
     words = [w for w in re.split(r"(\s+)", t) if w.strip().lower() not in MONTHS]
-    return re.sub(r"\s+", " ", "".join(words)).strip(" -_.,()[]")
+    t = re.sub(r"\s+", " ", "".join(words)).strip(" -_.,()[]")
+    # joining words left at either end once dates are gone: "2001 & 2002 papers" -> "papers" (#28)
+    edge = r"(?:and|&|to|til|till|until|-|\u2013|\u2014)"
+    t = re.sub(rf"^(?:{edge}(?:[\s_]+|$))+", "", t, flags=re.I)
+    t = re.sub(rf"(?:(?:^|[\s_]+){edge})+$", "", t, flags=re.I)
+    return t.strip(" -_.,()[]")
 
 
 def meaningful_folder(name: str) -> str | None:
