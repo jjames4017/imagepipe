@@ -652,3 +652,21 @@ def test_odd_extension_not_used_in_new_name():
 
     assert build_name("IPX", "2001", "Tree", "xls whakapapa") == "IPX_2001_Tree-xls-whakapapa"
     assert build_name("IPX", "2001", "Tree", "doc") == "IPX_2001_Tree.doc"
+
+
+# ------------------------------------------------- #18 smartname characters
+def test_smartname_characters_and_cut():
+    from imagepipe.triage.naming import clean_part, cut_at_hyphen, smartname
+
+    assert clean_part("logo_top (3)") == "logo-top-3"
+    assert clean_part("Letters & Envelopes") == "Letters-and-Envelopes"
+    assert clean_part("Ann Dansey, Bill & Reima Hall 2") == "Ann-Dansey-Bill-and-Reima-Hall-2"
+    assert clean_part("picnan's94thbirthday") == "picnan-s94thbirthday"
+    assert clean_part("Andrew Kusabs (Andrew@kusabs.co.nz)") == "Andrew-Kusabs-Andrew-kusabs-co-nz"
+    assert clean_part("Māori whakapapa – Ōtaki [draft] #2!") == "Māori-whakapapa-Ōtaki-draft-2"
+    assert clean_part("bad\udc80bytes") == "bad-bytes"
+    assert cut_at_hyphen("Andrew-Kusabs-Andrew-kusabs", 18) == "Andrew-Kusabs"
+    assert cut_at_hyphen("Andrew-Kusabs-Andrew", 13) == "Andrew-Kusabs"
+    assert cut_at_hyphen("Supercalifragilistic", 5) == "Super"
+    name, _ = smartname(None, None, ["Letters & Envelopes"], "Colleens Address (big) envelope", 30)
+    assert name == "Letters-and-Envelopes-Colleens"

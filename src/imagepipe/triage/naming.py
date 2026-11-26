@@ -51,7 +51,6 @@ _CAMERA_NAME_RE = re.compile(
     re.I,
 )
 _UUIDISH_RE = re.compile(r"^[0-9a-f]{8}(-?[0-9a-f]{4}){3}-?[0-9a-f]{12}$|^[0-9a-f\-_]{16,}$", re.I)
-_BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f\uf780-\uf7ff\udc80-\udcff]')  # incl. bytes that weren't UTF-8
 
 
 # ---------------------------------------------------------------- dates
@@ -130,12 +129,27 @@ def date_from_mtime(mtime: float, tz: ZoneInfo) -> str:
 
 # ---------------------------------------------------------------- smartname
 def clean_part(text: str) -> str:
-    """Make text safe for a file name on Linux, Mac and Windows (SMB)."""
+    """Letters (accents and macrons kept), digits and hyphens only; & becomes "and".
+
+    Everything else - brackets, commas, apostrophes, @, dots ... - is removed, and
+    runs of spaces/underscores/removed characters become a single hyphen.
+    """
     text = unicodedata.normalize("NFC", text)
-    text = _BAD_CHARS.sub(" ", text)
-    text = re.sub(r"[\s_.]+", "-", text.strip())  # no dots: the first dot starts the extension
-    text = re.sub(r"-{2,}", "-", text)
-    return text.strip("-. ")
+    text = text.replace("&", " and ")
+    text = "".join(ch if (ch.isalnum() or ch == "-") else " " for ch in text)
+    text = re.sub(r"[\s-]+", "-", text.strip())
+    return text.strip("-")
+
+
+def cut_at_hyphen(text: str, limit: int) -> str:
+    """Shorten to at most `limit` characters, cutting at a hyphen rather than mid-word."""
+    if len(text) <= limit:
+        return text
+    if text[limit] == "-":
+        return text[:limit].rstrip("-")
+    cut = text[:limit]
+    head = cut.rsplit("-", 1)[0] if "-" in cut else cut  # one long word: no choice but to cut it
+    return head.rstrip("-") or cut
 
 
 def _strip_dates(text: str) -> str:
@@ -194,8 +208,7 @@ def smartname(place: str | None, title: str | None, folders: list[str], stem: st
             parts.append(c)
             seen.add(c.lower())
     name = "-".join(parts) or clean_part(stem) or "file"
-    if len(name) > max_len:
-        name = name[:max_len].rstrip("-. ")
+    name = cut_at_hyphen(name, max_len)
     return name, "+".join(src for _t, src in pieces)
 
 
@@ -211,7 +224,7 @@ def build_name(pid: str, date: str, smart: str, ext: str) -> str:
     suffix = f".{ext}" if ext else ""
     # keep the whole name well inside the 255-byte limit of most file systems
     while len((name + suffix).encode("utf-8")) > 200 and len(smart) > 1:
-        smart = smart[:-1].rstrip("-. ")
+        smart = cut_at_hyphen(smart, len(smart) - 1)
         name = f"{pid}_{date}_{smart}"
     return name + suffix
 
