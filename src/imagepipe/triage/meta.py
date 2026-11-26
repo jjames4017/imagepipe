@@ -1,10 +1,12 @@
 """Reading the details triage needs from inside files: dates, GPS, titles,
-Google Takeout JSON and XMP sidecars."""
+Google Takeout JSON, XMP sidecars, Photoshop headers and password-protected
+Office files."""
 
 from __future__ import annotations
 
 import json
 import re
+import struct
 import zipfile
 from datetime import datetime, timezone
 from xml.etree import ElementTree
@@ -131,6 +133,96 @@ def image_meta(path: str) -> dict:
         if title:
             out["meta_title"] = title
     return out
+
+
+def psd_meta(path: str) -> dict:
+    """Width and height from a Photoshop .psd/.psb header.
+
+    Pillow can't open layered or newer Photoshop files, so the header is read
+    directly. Raises ValueError if the file isn't a valid PSD/PSB.
+    """
+    with open(path, "rb") as fh:
+        head = fh.read(26)
+    if len(head) < 26 or head[:4] != b"8BPS":
+        raise ValueError("not a Photoshop file (no 8BPS header)")
+    version, = struct.unpack(">H", head[4:6])
+    if version not in (1, 2):
+        raise ValueError(f"unknown Photoshop version {version}")
+    height, width = struct.unpack(">II", head[14:22])
+    if not (0 < width <= 300000 and 0 < height <= 300000):
+        raise ValueError(f"bad Photoshop size {width}x{height}")
+    return {"width": width, "height": height}
+
+
+OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+_FREESECT, _ENDOFCHAIN = 0xFFFFFFFF, 0xFFFFFFFE
+
+
+def ole_stream_names(path: str, max_sectors: int = 1 << 22) -> set[str]:
+    """Names of the streams and storages in an OLE compound file (old Office
+    format, and the container used for password-protected Office files).
+
+    A small, read-only reader of the directory only. Raises ValueError if the
+    file isn't a valid compound file.
+    """
+    with open(path, "rb") as fh:
+        hdr = fh.read(512)
+        if len(hdr) < 512 or hdr[:8] != OLE_MAGIC:
+            raise ValueError("not an OLE compound file")
+        shift, = struct.unpack("<H", hdr[0x1E:0x20])
+        if shift not in (9, 12):
+            raise ValueError(f"bad OLE sector size 2^{shift}")
+        ss = 1 << shift
+        n_fat, first_dir = struct.unpack("<II", hdr[0x2C:0x34])
+        first_difat, n_difat = struct.unpack("<II", hdr[0x44:0x4C])
+        per = ss // 4
+
+        def sector(n: int) -> bytes:
+            fh.seek((n + 1) * ss)
+            data = fh.read(ss)
+            if len(data) < ss:
+                raise ValueError(f"OLE sector {n} is past the end of the file")
+            return data
+
+        # where the FAT sectors are: 109 in the header, the rest in a DIFAT chain
+        fat_secs = [x for x in struct.unpack("<109I", hdr[0x4C:0x200]) if x < _ENDOFCHAIN]
+        nxt, seen = first_difat, 0
+        while nxt < _ENDOFCHAIN and seen < max(n_difat, 1) + 1:
+            vals = struct.unpack(f"<{per}I", sector(nxt))
+            fat_secs += [x for x in vals[:-1] if x < _ENDOFCHAIN]
+            nxt, seen = vals[-1], seen + 1
+        fat_secs = fat_secs[:n_fat] if n_fat else fat_secs
+        if not fat_secs or len(fat_secs) * per > max_sectors:
+            raise ValueError("bad OLE allocation table")
+        fat: list[int] = []
+        for n in fat_secs:
+            fat.extend(struct.unpack(f"<{per}I", sector(n)))
+
+        names: set[str] = set()
+        cur, steps = first_dir, 0
+        while cur < _ENDOFCHAIN:
+            if cur >= len(fat) or steps > len(fat):
+                raise ValueError("broken OLE directory chain")
+            data = sector(cur)
+            for off in range(0, ss, 128):
+                entry = data[off:off + 128]
+                nlen, otype = struct.unpack("<HB", entry[0x40:0x43])
+                if otype in (1, 2, 5) and 2 <= nlen <= 64:
+                    names.add(entry[:nlen - 2].decode("utf-16-le", "replace"))
+            cur, steps = fat[cur], steps + 1
+    return names
+
+
+def ole_office_meta(path: str) -> dict:
+    """An Office file (.docx/.xlsx/...) whose contents are an OLE compound file.
+
+    Password-protected Office files are stored this way (EncryptionInfo +
+    EncryptedPackage streams) and are marked encrypted. Anything else is an old
+    binary Office file under a newer extension: a normal document, nothing to read.
+    """
+    if "EncryptedPackage" in ole_stream_names(path):
+        return {"encrypted": 1}
+    return {}
 
 
 def exiftool_meta(et, path: str, kind: str) -> dict:

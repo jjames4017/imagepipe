@@ -102,6 +102,8 @@ def classify(row, overrides: dict[str, str]) -> tuple[str, str]:
                 or mime == "application/zip":
             return "extract", f"archive-{ext or mime.rsplit('/', 1)[-1]}"
     if kind == "document":
+        if row["encrypted"]:  # password-protected Office file
+            return "quarantine/encrypted", "encrypted-document"
         if row["takeout_title"]:
             return "imagepipe", "takeout-json-unmatched"
         if ext in EXT_BUCKET:

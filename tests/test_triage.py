@@ -468,3 +468,100 @@ def test_one_bad_move_or_archive_does_not_stop_apply(env, monkeypatch):
     assert r["file-cabinet:letters/letter.docx"]["status"] == "done"
     assert r["photos:2014/Bali/IMG_1234.jpg"]["status"] == "done"
     assert not any((vault / "triage-work").glob("*/*"))
+
+
+# ------------------------------------------------- PSD, OLE Office files, problem count
+def psd(width=40, height=30, version=1) -> bytes:
+    """A minimal Photoshop header Pillow can't open (no image data)."""
+    return (b"8BPS" + version.to_bytes(2, "big") + b"\x00" * 6 + (3).to_bytes(2, "big")
+            + height.to_bytes(4, "big") + width.to_bytes(4, "big") + (8).to_bytes(2, "big")
+            + (3).to_bytes(2, "big") + b"\x00" * 64)
+
+
+def ole(streams: list[str]) -> bytes:
+    """A minimal OLE compound file: one FAT sector, one directory sector."""
+    import struct
+
+    end, free = 0xFFFFFFFE, 0xFFFFFFFF
+    hdr = struct.pack("<8s16sHHHHH6sIIIIIIIII", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", b"\x00" * 16,
+                      0x3E, 3, 0xFFFE, 9, 6, b"\x00" * 6, 0, 1, 1, 0, 4096, end, 0, end, 0)
+    hdr += struct.pack("<109I", 0, *([free] * 108))
+    fat = struct.pack("<128I", 0xFFFFFFFD, end, *([free] * 126))
+
+    def entry(name: str, otype: int) -> bytes:
+        raw = (name + "\x00").encode("utf-16-le")
+        return (raw.ljust(64, b"\x00") + struct.pack("<HBB3I", len(raw), otype, 1, free, free, free)
+                + b"\x00" * 36 + struct.pack("<IQ", end, 0))
+
+    entries = entry("Root Entry", 5) + b"".join(entry(s, 2) for s in streams)
+    return hdr + fat + entries.ljust(512, b"\x00")
+
+
+def test_psd_and_ole_readers(tmp_path):
+    from imagepipe.triage.meta import ole_office_meta, ole_stream_names, psd_meta
+
+    p = tmp_path / "a.psd"
+    p.write_bytes(psd(1200, 800))
+    assert psd_meta(str(p)) == {"width": 1200, "height": 800}
+    p.write_bytes(psd(5, 6, version=2))  # PSB
+    assert psd_meta(str(p)) == {"width": 5, "height": 6}
+    p.write_bytes(b"8BPS" + b"\x00" * 4)
+    with pytest.raises(ValueError):
+        psd_meta(str(p))
+
+    o = tmp_path / "x.xlsx"
+    o.write_bytes(ole(["EncryptionInfo", "EncryptedPackage"]))
+    assert ole_stream_names(str(o)) >= {"Root Entry", "EncryptionInfo", "EncryptedPackage"}
+    assert ole_office_meta(str(o)) == {"encrypted": 1}
+    o.write_bytes(ole(["Workbook"]))
+    assert ole_office_meta(str(o)) == {}
+    o.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 100)
+    with pytest.raises(ValueError):
+        ole_stream_names(str(o))
+
+
+def test_psd_and_protected_office_are_not_problems(env):
+    cfg, vault = env
+    build(vault / "file cabinet", {
+        "art/war.PSD": psd(1200, 800),
+        "fin/Banking Details.docx": ole(["EncryptionInfo", "EncryptedPackage", "\x06DataSpaces"]),
+        "fin/old format.xlsx": ole(["Workbook", "\x05SummaryInformation"]),
+        "fin/really html.xlsx": b"<html><body><table></table></body></html>",
+        "fin/damaged.docx": b"PK\x03\x04" + b"garbage" * 20,
+    })
+    res = run_scan(cfg, cfg.triage.source("file-cabinet"))
+    assert res["status"] == "finished"
+    r = rows(cfg)
+    war = r["file-cabinet:art/war.PSD"]
+    assert war["catalogue_error"] is None and (war["width"], war["height"]) == (1200, 800)
+    locked = r["file-cabinet:fin/Banking Details.docx"]
+    assert locked["catalogue_error"] is None and locked["encrypted"] == 1
+    for name in ("old format.xlsx", "really html.xlsx"):
+        assert r[f"file-cabinet:fin/{name}"]["catalogue_error"] is None, name
+    assert "BadZipFile" in r["file-cabinet:fin/damaged.docx"]["catalogue_error"]  # real damage still reported
+    assert res["read_problems"] == 1
+
+    assert run_plan(cfg)["status"] == "finished"
+    r = rows(cfg)
+    assert r["file-cabinet:art/war.PSD"]["bucket"] == "imagepipe"
+    assert r["file-cabinet:fin/Banking Details.docx"]["bucket"] == "quarantine/encrypted"
+    assert r["file-cabinet:fin/old format.xlsx"]["bucket"] == "docupipe"
+
+
+def test_progress_problem_count_is_a_running_total(monkeypatch):
+    import imagepipe.triage.scan as scan_mod
+
+    class Pool:
+        def imap_unordered(self, fn, items, chunksize=1):
+            return iter([{"key": 1, "size": 1, "catalogue_error": "x"}, {"key": 2, "size": 1, "catalogue_error": None}])
+
+    class Prog:
+        extra = ""
+
+        def update(self, n, nbytes, extra=None):
+            self.extra = extra
+
+    monkeypatch.setattr(scan_mod, "_write_rows", lambda *a: 0)
+    p = Prog()
+    assert scan_mod.read_items(None, Pool(), [], {}, 1, p, errors_before=30) == 1
+    assert p.extra == "31 problems"
