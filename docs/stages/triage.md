@@ -83,6 +83,20 @@ front of a file name is kept.
    year-month or year; `2014/07/` folders combine to `2014-07`
 4. the file's modified time
 
+Two exceptions:
+
+- **Office files**: a date in the file name wins over the Office created date,
+  and a descriptive file name is used for the smartname rather than the Office
+  title (both are often inherited from a template). The Office title is used
+  only when the file name isn't descriptive.
+- **Camera clocks that were never set**: an EXIF date of 1 January 1970, 1980
+  or 2000-2010, at around midnight or noon (or with no time), is used only if
+  no date is found in a sidecar, the file name or the folders. When it is used
+  anyway, its source shows as e.g. `exif-default-clock`.
+
+A compact `YYYYMMDDHHMMSS` timestamp in a file name
+(`DVR_20121124004613.mp4`) counts as a date and time.
+
 When the date comes from inside the file, a sidecar or the file name and a time
 is known, the time is added: `2016-05-15_064331` (or `_0643` without seconds).
 Dates from folder names or the modified time have no time, and a time of
@@ -100,7 +114,8 @@ straight after them) are left out. If nothing is left, the original file name
 is used.
 
 Smartnames contain only letters (accented letters and macrons kept, e.g. `ā`),
-digits and hyphens: `&` becomes `and`, and brackets, commas, apostrophes, `@`
+digits and hyphens: `&` becomes `and`, apostrophes are dropped without
+splitting the word (`you're` -> `youre`), and brackets, commas, apostrophes, `@`
 and every other symbol are removed (`logo_top (3)` -> `logo-top-3`). A name cut
 to `smartname_max_length` is cut at a hyphen, never mid-word. Smartnames never
 contain `_` or `.`, so the ID is always everything before the first `_`.

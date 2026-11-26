@@ -24,8 +24,8 @@ from imagepipe.ids import id_from_name, new_id
 from imagepipe.progress import Progress
 from imagepipe.triage import db as tdb
 from imagepipe.triage.kinds import classify
-from imagepipe.triage.naming import (Geocoder, build_name, date_from_mtime, date_from_path, name_date_of,
-                                     smartname)
+from imagepipe.triage.naming import (Geocoder, build_name, date_from_mtime, date_from_path,
+                                     descriptive_filename, is_default_clock, name_date_of, smartname)
 
 log = logging.getLogger("imagepipe")
 
@@ -151,6 +151,36 @@ class Planner:
                 say("Note: reverse_geocoder is not installed - GPS will not be turned into place names.")
         return self._geo
 
+    def _pick_date(self, r, name: str, folders: list[str], sidecars: list) -> tuple[str, str]:
+        """(name date, source) for one file. See naming.py for the order.
+
+        A camera default-clock EXIF date (#25) is only used if nothing better is found;
+        a date in an Office file's name wins over the Office created date (#23).
+        """
+        tc = self.tc
+        suspect = None
+        candidates: list[tuple[str | None, str | None]] = []
+        if r["meta_date"] and r["meta_date_src"] in EMBEDDED_SOURCES:
+            candidates.append((r["meta_date"], r["meta_date_src"]))
+        candidates += [(s["meta_date"], f"sidecar-{s['meta_date_src']}") for s in sidecars if s["meta_date"]]
+        if r["meta_date"] and r["meta_date_src"] not in EMBEDDED_SOURCES:
+            candidates.append((r["meta_date"], r["meta_date_src"]))
+        if r["meta_date_src"] == "office":
+            found = date_from_path(name, [], tc.day_first)  # the file name only, not its folders
+            if found:
+                return found
+        for meta, src in candidates:
+            if is_default_clock(meta):
+                suspect = suspect or (name_date_of(meta), f"{src}-default-clock")
+                continue
+            return name_date_of(meta), src
+        found = date_from_path(name, folders, tc.day_first)
+        if found:
+            return found
+        if suspect:
+            return suspect  # better than the modified time
+        return date_from_mtime(r["mtime"], self.cfg.tz), "mtime"
+
     def _pick_id(self, row) -> str:
         if row["triage_id"]:
             return row["triage_id"]
@@ -268,24 +298,13 @@ class Planner:
             pid = self._pick_id(r)
             name = os.path.basename(r["rel_path"])
             folders = [p for p in r["dir"].split("/") if p]
-            date = src = None
-            if r["meta_date"] and r["meta_date_src"] in EMBEDDED_SOURCES:
-                date, src = name_date_of(r["meta_date"]), r["meta_date_src"]
-            if date is None:
-                for s in side_meta.get(r["id"], []):
-                    if s["meta_date"]:
-                        date, src = name_date_of(s["meta_date"]), f"sidecar-{s['meta_date_src']}"
-                        break
-            if date is None and r["meta_date"]:
-                date, src = name_date_of(r["meta_date"]), r["meta_date_src"]
-            if date is None:
-                found = date_from_path(name, folders, tc.day_first)
-                if found:
-                    date, src = found
-            if date is None:
-                date, src = date_from_mtime(r["mtime"], self.cfg.tz), "mtime"
+            date, src = self._pick_date(r, name, folders, side_meta.get(r["id"], []))
             title = r["meta_title"] or next((s["meta_title"] for s in side_meta.get(r["id"], [])
                                              if s["meta_title"]), None)
+            if r["meta_date_src"] == "office" and descriptive_filename(_stem(name)):
+                # an Office title is often the template's ("Risk Assessment Register"): a
+                # descriptive file name says more about this file (#23)
+                title = None
             smart, smart_src = smartname(place_of.get(r["id"]), title, folders, _stem(name), tc.smartname_max_length)
             dest = None
             if bucket != "extract":
