@@ -156,6 +156,33 @@ def _image_meta(path: str) -> dict:
     return out
 
 
+def eml_meta(path: str, tz_name: str | None = None) -> dict:
+    """Sent date from an email's Date: header (#45), in the configured time zone.
+
+    Only the headers are read (at most the first 256 KB).
+    """
+    from email.parser import BytesHeaderParser
+    from email.utils import parsedate_to_datetime
+    from zoneinfo import ZoneInfo
+
+    with open(path, "rb") as fh:
+        head = fh.read(256 * 1024)
+    cut = re.search(rb"\r?\n\r?\n", head)
+    msg = BytesHeaderParser().parsebytes(head[: cut.end()] if cut else head)
+    raw = msg.get("Date")
+    if not raw:
+        return {}
+    try:
+        dt = parsedate_to_datetime(str(raw))
+    except (TypeError, ValueError, IndexError):
+        return {}
+    if dt is None or not (1971 <= dt.year <= 2100):
+        return {}
+    if dt.tzinfo is not None and tz_name:
+        dt = dt.astimezone(ZoneInfo(tz_name))
+    return {"meta_date": dt.strftime("%Y-%m-%d %H:%M:%S"), "meta_date_src": "email"}
+
+
 def psd_meta(path: str) -> dict:
     """Width and height from a Photoshop .psd/.psb header.
 

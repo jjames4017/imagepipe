@@ -85,8 +85,9 @@
           <span class="muted">Scan reads</span><select id="t-reread">
             <option value="">new and changed files</option>
             <option value="problems">+ re-read problem files</option>
+            <option value="ext">+ re-read file types:</option>
             <option value="all">everything again</option>
-          </select></div>
+          </select><input id="t-reread-ext" placeholder="e.g. eml" style="width:110px" hidden></div>
         <div class="row">
           <button class="b" data-job="triage-scan">Scan</button>
           <button class="b" data-job="triage-plan">Plan (dry run)</button>
@@ -245,7 +246,7 @@ async function loadMeta() {
 let lineCount = 0, lastJobId = null;
 $$("[data-job]").forEach(b => b.onclick = async () => {
   const kind = b.dataset.job, options = {};
-  if (kind.startsWith("triage-scan")) { options.source = $("#t-source").value; options.reread = $("#t-reread").value; }
+  if (kind.startsWith("triage-scan")) { options.source = $("#t-source").value; options.reread = $("#t-reread").value; options.reread_ext = $("#t-reread-ext").value; }
   if (["catalogue", "report", "export-csv"].includes(kind)) options.source = $("#c-source").value;
   if (kind === "catalogue") options.retry_errors = $("#c-retry").checked;
   if (kind === "triage-apply") {
@@ -367,6 +368,7 @@ async function loadReports() {
     $("#r-view").textContent = t.length > 2_000_000 ? t.slice(0, 2_000_000) + "\n\n... (truncated - use download)" : t; });
 }
 $("#r-refresh").onclick = loadReports;
+$("#t-reread").onchange = () => { $("#t-reread-ext").hidden = $("#t-reread").value !== "ext"; };
 async function deleteReports(body, question) {
   if (!confirm(question)) return;
   try {

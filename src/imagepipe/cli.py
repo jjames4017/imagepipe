@@ -137,7 +137,8 @@ def cmd_triage_scan(cfg, args) -> int:
     code = 0
     for source in sources:
         try:
-            result = run_scan(cfg, source, reread=args.reread)
+            result = run_scan(cfg, source, reread="ext" if args.reread_ext else args.reread,
+                              reread_ext=[args.reread_ext] if args.reread_ext else None)
         except TriageAbort as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             log.error(str(exc))
@@ -267,6 +268,8 @@ def build_parser() -> argparse.ArgumentParser:
     rr = ts.add_mutually_exclusive_group()
     rr.add_argument("--reread-problems", dest="reread", action="store_const", const="problems",
                     help="also read again every file that had a read problem last time")
+    rr.add_argument("--reread-ext", metavar="TYPES",
+                    help="also read again every file of these types, e.g. eml or eml,msg")
     rr.add_argument("--reread-all", dest="reread", action="store_const", const="all",
                     help="read every file again, ignoring the unchanged check")
     ts.set_defaults(func=cmd_triage_scan)
