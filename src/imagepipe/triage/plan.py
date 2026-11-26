@@ -27,7 +27,8 @@ from imagepipe.triage import db as tdb
 from imagepipe.triage.kinds import classify
 from imagepipe.triage.meta import is_generic_title
 from imagepipe.triage.naming import (Geocoder, build_name, date_from_mtime, date_from_path,
-                                     ddmmyy_in, descriptive_filename, is_default_clock, name_date_of, smartname)
+                                     ddmmyy_in, descriptive_filename, is_default_clock, name_date_of, smartname,
+                                     with_original_name)
 
 log = logging.getLogger("imagepipe")
 
@@ -150,6 +151,7 @@ class Planner:
         self._geo = None
         self.used_ids: set[str] = set()
         self._web: dict[tuple[str, int], WebPages] = {}
+        self._drift: dict | None = None
 
     def web(self, source: str, parent_id: int) -> WebPages:
         key = (source, parent_id)
@@ -167,7 +169,27 @@ class Planner:
                 say("Note: reverse_geocoder is not installed - GPS will not be turned into place names.")
         return self._geo
 
-    def _pick_date(self, r, name: str, folders: list[str], sidecars: list) -> tuple[str, str]:
+    def _drift_years(self) -> dict[tuple[str, str], set[int]]:
+        """Camera (make, model) -> years whose 1 January it showed as a default clock (#35)."""
+        if self._drift is None:
+            self._drift = {}
+            for row in self.t.db.execute(
+                    "SELECT camera_make, camera_model, meta_date FROM files WHERE meta_date_src='exif' "
+                    "AND camera_model IS NOT NULL AND substr(meta_date, 5, 6) = '-01-01'"):
+                if is_default_clock(row[2]):
+                    self._drift.setdefault((row[0] or "", row[1]), set()).add(int(row[2][:4]))
+        return self._drift
+
+    def _suspect_exif(self, r, meta: str, src: str) -> bool:
+        if is_default_clock(meta):
+            return True
+        if src != "exif" or not r["camera_model"] or not meta[:4].isdigit():
+            return False
+        # a camera whose clock started at a default date and ran on from there
+        return int(meta[:4]) in self._drift_years().get((r["camera_make"] or "", r["camera_model"]), ())
+
+    def _pick_date(self, r, name: str, folders: list[str], sidecars: list,
+                   bucket: str | None = None) -> tuple[str, str]:
         """(name date, source) for one file. See naming.py for the order.
 
         A camera default-clock EXIF date (#25) is only used if nothing better is found;
@@ -190,11 +212,13 @@ class Planner:
             if short:
                 return short[0], "filename"
         for meta, src in candidates:
-            if is_default_clock(meta):
+            if self._suspect_exif(r, meta, src):
                 suspect = suspect or (name_date_of(meta), f"{src}-default-clock")
                 continue
             return name_date_of(meta), src
         found = date_from_path(name, folders, tc.day_first)
+        if found and bucket == "sorted/ebooks" and found[1] == "filename" and len(found[0]) == 4:
+            found = date_from_path("", folders, tc.day_first)  # a year in a book title isn't its date (#36)
         if found:
             return found
         if suspect:
@@ -319,7 +343,7 @@ class Planner:
             # %20 and friends decoded for reading dates and names; folders on disk are unchanged (#32)
             name = _decoded(os.path.basename(r["rel_path"]))
             folders = [_decoded(p) for p in r["dir"].split("/") if p]
-            date, src = self._pick_date(r, name, folders, side_meta.get(r["id"], []))
+            date, src = self._pick_date(r, name, folders, side_meta.get(r["id"], []), bucket)
             title = r["meta_title"] or next((s["meta_title"] for s in side_meta.get(r["id"], [])
                                              if s["meta_title"]), None)
             if title and is_generic_title(title):
@@ -333,7 +357,12 @@ class Planner:
                 short = ddmmyy_in(stem, folders + _office_year(r), tc.day_first)
                 if short and date == short[0]:
                     stem = stem.replace(short[1], " ")  # the DDMMYY date is in the name's date part now
-            smart, smart_src = smartname(place_of.get(r["id"]), title, folders, stem, tc.smartname_max_length)
+            ebook = bucket == "sorted/ebooks"
+            smart, smart_src = smartname(place_of.get(r["id"]), title, folders, stem, tc.smartname_max_length,
+                                         keep_dates=ebook)
+            if bucket and bucket.startswith("quarantine/"):
+                smart = with_original_name(smart, _stem(name), tc.smartname_max_length)
+                smart_src += "+original-name"
             dest = None
             if bucket != "extract":
                 new_name = build_name(pid, date, smart, (r["ext"] or "").lower())

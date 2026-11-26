@@ -27,6 +27,8 @@ MONTHS = {m: i for i, m in enumerate(
 MONTHS.update({"january": 1, "february": 2, "march": 3, "april": 4, "june": 6, "july": 7, "august": 8,
                "september": 9, "sept": 9, "october": 10, "november": 11, "december": 12})
 
+_MONTH_ALT = "|".join(sorted(MONTHS, key=len, reverse=True))
+
 GENERIC_FOLDERS = {
     "dcim", "camera", "camera roll", "camera uploads", "photos", "photo", "pictures", "picture", "images", "image",
     "img", "imgs", "pics", "pic", "new folder", "untitled folder", "folder", "backup", "backups", "misc", "other",
@@ -152,6 +154,10 @@ def date_in_text(text: str, day_first: bool = True) -> str | None:
     for m in re.finditer(r"(?<!\d)((?:19|20)\d{2})[\s_.-]*([a-z]{3,9})(?![a-z])", low):
         if m.group(2) in MONTHS and _valid(int(m.group(1)), MONTHS[m.group(2)]):
             return f"{int(m.group(1)):04d}-{MONTHS[m.group(2)]:02d}"
+    # a month name joined to the letters before it: "WTBDMay2009" (#39)
+    for m in re.finditer(r"(" + _MONTH_ALT + r")[\s_.-]?((?:19|20)\d{2})(?!\d)", low):
+        if _valid(int(m.group(2)), MONTHS[m.group(1)]):
+            return f"{int(m.group(2)):04d}-{MONTHS[m.group(1)]:02d}"
     # YYYY-MM
     for m in re.finditer(r"(?<!\d)((?:19|20)\d{2})[-_.](\d{2})(?!\d)", t):
         if _valid(int(m.group(1)), int(m.group(2))):
@@ -274,11 +280,22 @@ def meaningful_folder(name: str) -> str | None:
     return base
 
 
-def descriptive_filename(stem: str) -> str | None:
+_HEX_ID_RE = re.compile(
+    r"(?<![0-9A-Za-z])(?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}|[0-9A-Fa-f]{16,})"
+    r"(?![0-9A-Za-z])")
+
+
+def drop_hex_ids(text: str) -> str:
+    """Remove UUIDs and runs of 16+ hex characters: they say nothing to a person (#38)."""
+    return _HEX_ID_RE.sub(" ", text)
+
+
+def descriptive_filename(stem: str, keep_dates: bool = False) -> str | None:
     s = stem.strip()
     if not s or _CAMERA_NAME_RE.match(s) or _UUIDISH_RE.match(s):
         return None
-    s = _strip_dates(s)
+    if not keep_dates:
+        s = _strip_dates(s)
     s = re.sub(r"^(img|dsc|pxl|vid|scan|screenshot|whatsapp image)[\s_-]*", "", s, flags=re.I)
     s = re.sub(r"[\s_-]*(\(\d+\)|copy|edited|-e)$", "", s, flags=re.I)
     if not s or _CAMERA_NAME_RE.match(s) or not re.search(r"[^\W\d_]{3}", s):
@@ -287,8 +304,11 @@ def descriptive_filename(stem: str) -> str | None:
 
 
 def smartname(place: str | None, title: str | None, folders: list[str], stem: str,
-              max_len: int = 80) -> tuple[str, str]:
-    """(smartname, source). Source names what it was built from, e.g. 'gps+folder'."""
+              max_len: int = 80, keep_dates: bool = False) -> tuple[str, str]:
+    """(smartname, source). Source names what it was built from, e.g. 'gps+folder'.
+
+    keep_dates keeps years in the file name part (ebook titles: "Red Inferno 1945").
+    """
     pieces: list[tuple[str, str]] = []
     if place:
         pieces.append((place, "gps"))
@@ -298,20 +318,33 @@ def smartname(place: str | None, title: str | None, folders: list[str], stem: st
         found = [f for f in (meaningful_folder(x) for x in folders) if f]
         if found:
             pieces.append(("-".join(found[-2:]), "folder"))
-        desc = descriptive_filename(stem)
+        desc = descriptive_filename(stem, keep_dates)
         if desc:
             pieces.append((desc, "filename"))
     if not pieces:
         pieces = [(stem, "original-name")]
     parts, seen = [], set()
     for text, _src in pieces:
-        c = clean_part(text)
+        c = clean_part(drop_hex_ids(text))
         if c and c.lower() not in seen:
             parts.append(c)
             seen.add(c.lower())
     name = "-".join(parts) or clean_part(stem) or "file"
     name = cut_at_hyphen(name, max_len)
     return name, "+".join(src for _t, src in pieces)
+
+
+def with_original_name(smart: str, stem: str, max_len: int = 80) -> str:
+    """smart + the original file name (cleaned) at the end, for files going to quarantine (#37).
+
+    The original name is never cut; the rest is shortened to make room.
+    """
+    orig = clean_part(stem)
+    if not orig or orig.lower() == smart.lower() or smart.lower().endswith("-" + orig.lower()):
+        return smart or orig or "file"
+    room = max_len - len(orig) - 1
+    head = cut_at_hyphen(smart, room) if room > 0 else ""
+    return f"{head}-{orig}" if head else orig
 
 
 _GOOD_EXT_RE = re.compile(r"^[a-z0-9_]{1,15}$")
