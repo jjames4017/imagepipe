@@ -23,6 +23,7 @@ files - ready for PhotoPrism and Immich.
 |---|---|
 | Config, manifest database, logging, notifications | Built (0.1) |
 | [Catalogue](stages/catalogue.md) - read-only inventory of a folder | Built (0.1) |
+| [Triage](stages/triage.md) - sort mixed folder trees before they enter the pipeline | Built (0.2) |
 | Pipeline stages 1-12 | Planned - see the [roadmap](roadmap.md) |
 
 ## Where to go next

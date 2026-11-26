@@ -18,6 +18,7 @@ silently ignored.
 | `sources` | yes | | List of folders ImagePipe reads from |
 | `catalogue` | no | see below | Catalogue settings |
 | `notify` | no | see below | Notification settings |
+| `triage` | no | | Triage settings - see [Triage](stages/triage.md#configuration) |
 
 ## `sources`
 

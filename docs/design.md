@@ -18,6 +18,13 @@ disagree, this page describes the intent.
 
 ## Pipeline ID
 
+- Format: `IP` + 16 Crockford base32 characters (e.g. `IP01JDX4Q8M3K7ZB2R`) - creation
+  time in milliseconds, then 35 random bits. IDs sort by age and never repeat.
+  Made by `imagepipe.ids`, shared by triage and every stage.
+- Stored in the file as `XMP-dc:Identifier` (with the original location in
+  `XMP-dc:Source`) and at the front of the file name: `<ID>_...`.
+- Triage gives IDs to everything it sorts; a photo it hands to ImagePipe arrives
+  with one, which stage 2 keeps.
 - Assigned at stage 2 the first time a file is seen, written into the file's
   own metadata and recorded in the manifest. It survives A-Eye's renaming.
 - The manifest also keeps the original hashes, so a file can be traced after its

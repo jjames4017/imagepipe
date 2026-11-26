@@ -115,6 +115,107 @@ def cmd_notify_test(cfg, args) -> int:
     return 0 if ok else 1
 
 
+# ---------------------------------------------------------------- triage
+def _triage_cfg(cfg):
+    if cfg.triage is None:
+        raise ConfigError("There is no 'triage:' section in the config file. See config.example.yml.")
+    tc = cfg.triage
+    tc.log_dir.mkdir(parents=True, exist_ok=True)
+    path = tc.log_dir / f"triage-{datetime.now(cfg.tz):%Y%m%d}.log"
+    if not any(getattr(h, "baseFilename", None) == str(path) for h in log.handlers):
+        handler = logging.FileHandler(path, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        log.addHandler(handler)
+    return tc
+
+
+def cmd_triage_scan(cfg, args) -> int:
+    from imagepipe.triage.scan import TriageAbort, run_scan
+
+    tc = _triage_cfg(cfg)
+    sources = [tc.source(args.source)] if args.source else tc.sources
+    code = 0
+    for source in sources:
+        try:
+            result = run_scan(cfg, source)
+        except TriageAbort as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            log.error(str(exc))
+            notify.send(cfg.notify, "error", f"Triage scan stopped: {source.name}", str(exc), "failure")
+            return 2
+        body = (f"{result.get('read', 0):,} files read, {result.get('read_problems', 0):,} with problems, "
+                f"{result.get('missing', 0):,} missing. Scanned {result.get('scanned', 0):,} files "
+                f"({fmt_bytes(result.get('scanned_bytes', 0))}).")
+        print(f"Source '{source.name}': {body}", file=sys.stderr)
+        if result["status"] != "finished":
+            notify.send(cfg.notify, "error", f"Triage scan interrupted: {source.name}", body, "warning")
+            return 130
+        notify.send(cfg.notify, "finished", f"Triage scan finished: {source.name}", body, "success")
+    print("Next: imagepipe triage plan", file=sys.stderr)
+    return code
+
+
+def cmd_triage_plan(cfg, args) -> int:
+    from imagepipe.triage.plan import run_plan
+
+    _triage_cfg(cfg)
+    result = run_plan(cfg)
+    if result["status"] != "finished":
+        return 130
+    out = Path(result["report"])
+    print((out / "summary.md").read_text(encoding="utf-8"))
+    print(f"Plan written to: {out} (plan.csv lists every file)", file=sys.stderr)
+    return 0
+
+
+def cmd_triage_apply(cfg, args) -> int:
+    from imagepipe.triage.apply import run_apply
+    from imagepipe.triage.reports import write_apply_report
+    from imagepipe.triage.scan import TriageAbort
+
+    tc = _triage_cfg(cfg)
+    try:
+        result = run_apply(cfg, limit=args.limit)
+    except TriageAbort as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        log.error(str(exc))
+        notify.send(cfg.notify, "error", "Triage apply stopped", str(exc), "failure")
+        return 2
+    except Exception as exc:
+        log.exception("Triage apply failed")
+        notify.send(cfg.notify, "error", "Triage apply failed", repr(exc), "failure")
+        raise
+    path = write_apply_report(cfg, result)
+    print(path.read_text(encoding="utf-8"))
+    print(f"Report: {path}  |  Action log: {tc.reports_dir / 'actions.csv'}", file=sys.stderr)
+    stats = result.get("stats", {})
+    body = (f"{sum(v for k, v in stats.items() if k.startswith('moved:')):,} files moved, "
+            f"{stats.get('archives-extracted', 0):,} archives extracted, {stats.get('errors', 0):,} errors, "
+            f"{result.get('still_planned', 0):,} still planned.")
+    if result["status"] == "finished":
+        notify.send(cfg.notify, "finished", "Triage apply finished", body, "success")
+        return 0
+    notify.send(cfg.notify, "error", "Triage apply interrupted", body, "warning")
+    return 130
+
+
+def cmd_triage_status(cfg, args) -> int:
+    from imagepipe.triage.reports import status_text
+
+    _triage_cfg(cfg)
+    print(status_text(cfg))
+    return 0
+
+
+def cmd_triage_export(cfg, args) -> int:
+    from imagepipe.triage.reports import export_csv
+
+    _triage_cfg(cfg)
+    out = export_csv(cfg, Path(args.output) if args.output else None)
+    print(f"CSV written to: {out}", file=sys.stderr)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="imagepipe", description="ImagePipe photo pipeline")
     p.add_argument("--version", action="version", version=f"imagepipe {__version__}")
@@ -140,6 +241,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     n = sub.add_parser("notify-test", help="send a test notification through Apprise")
     n.set_defaults(func=cmd_notify_test)
+
+    t = sub.add_parser("triage", help="sort mixed folder trees: scan, plan (dry run), apply")
+    tsub = t.add_subparsers(dest="triage_command", required=True)
+    ts = tsub.add_parser("scan", help="read-only inventory of the triage sources")
+    ts.add_argument("--source", help="one triage source (default: all)")
+    ts.set_defaults(func=cmd_triage_scan)
+    tp = tsub.add_parser("plan", help="decide destinations and names; writes a dry-run report, moves nothing")
+    tp.set_defaults(func=cmd_triage_plan)
+    ta = tsub.add_parser("apply", help="carry out the plan: move, extract archives, write tags")
+    ta.add_argument("--limit", type=int, help="stop after this many files/archives (for a trial run)")
+    ta.set_defaults(func=cmd_triage_apply)
+    tst = tsub.add_parser("status", help="counts by status and bucket, recent runs")
+    tst.set_defaults(func=cmd_triage_status)
+    te = tsub.add_parser("export-csv", help="write every file in the triage database to one CSV")
+    te.add_argument("--output")
+    te.set_defaults(func=cmd_triage_export)
     return p
 
 
