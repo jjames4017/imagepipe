@@ -35,7 +35,7 @@ class CatalogueConfig:
     hash: str = "sha256"
     read_image_metadata: bool = True
     use_exiftool: bool = True
-    list_archive_contents: bool = False
+    list_archive_contents: bool = True
     batch_size: int = 500
 
 

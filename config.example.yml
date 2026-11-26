@@ -24,7 +24,7 @@ catalogue:
   hash: sha256                        # sha256 | none
   read_image_metadata: true           # dimensions, EXIF, camera, date
   use_exiftool: true                  # RAW and video details (exiftool is in the Docker image)
-  list_archive_contents: false        # list what's inside .zip files
+  list_archive_contents: true         # list what's inside .zip files (reads the index only, extracts nothing)
   batch_size: 500                     # files per database commit
 
 notify:

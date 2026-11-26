@@ -36,7 +36,7 @@ silently ignored.
 | `hash` | `sha256` | `sha256` reads every byte to fingerprint each file (needed for duplicate finding). `none` skips it for a fast first look. |
 | `read_image_metadata` | `true` | Read dimensions, EXIF, camera and date |
 | `use_exiftool` | `true` | Use ExifTool for RAW and video details. Included in the Docker image. |
-| `list_archive_contents` | `false` | List the files inside `.zip` archives (names, sizes, a type guessed from the name) |
+| `list_archive_contents` | `true` | List the files inside `.zip` archives (names, sizes, a type guessed from the name). Reads only the zip's index; nothing is extracted. RAR, 7z and gzip files are recorded as single files. |
 | `batch_size` | `500` | Files per database commit |
 
 ## `notify`

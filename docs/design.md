@@ -110,6 +110,19 @@ The better copy replaces the library photo:
 - The pipeline pauses at stage 10 until you release the batch.
 - Names are written into the file as face regions plus `People/<Name>` keywords.
 
+## Archives and Google Takeout
+
+- Catalogue lists what is inside every zip (index only, nothing extracted), so
+  zips that hold photos can be found.
+- The feeder extracts image files from zips into the inbox. The zip itself stays
+  untouched in the source; the manifest records each photo's source as
+  `<zip path> → <file inside>`.
+- Google Takeout often keeps a photo's real date and GPS only in the `.json`
+  file beside it. ImagePipe reads those files and merges the date and location
+  into the photo at stages 7 and 8.
+- Database dumps (for example Immich `.sql.gz` backups) are catalogued like any
+  other file and never enter the photo flow.
+
 ## Video
 
 - Live Photo clips stay with their photo.
