@@ -31,4 +31,4 @@ notify:
   apprise_url: ""                     # base URL of your Apprise API server, e.g. http://apprise:8000
   apprise_key: ""                     # the Apprise config key that routes to your services (ntfy etc.)
   tags: ""                            # optional Apprise tag(s)
-  on: [finished, error]               # which events send a notification
+  events: [finished, error]           # which events send a notification

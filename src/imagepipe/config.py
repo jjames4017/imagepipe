@@ -44,7 +44,7 @@ class NotifyConfig:
     apprise_url: str = ""
     apprise_key: str = ""
     tags: str = ""
-    on: list[str] = field(default_factory=lambda: ["finished", "error"])
+    events: list[str] = field(default_factory=lambda: ["finished", "error"])
 
     @property
     def enabled(self) -> bool:
@@ -83,9 +83,12 @@ def _section(data: dict, key: str) -> dict:
 
 def _known(cls, values: dict, section: str):
     allowed = set(cls.__dataclass_fields__)
-    unknown = set(values) - allowed
+    unknown = {str(k) for k in values} - allowed
     if unknown:
-        raise ConfigError(f"Unknown key(s) in '{section}': {', '.join(sorted(unknown))}")
+        hint = ""
+        if {"True", "False"} & unknown:
+            hint = " (YAML reads unquoted on/off/yes/no as true/false - check the key names)"
+        raise ConfigError(f"Unknown key(s) in '{section}': {', '.join(sorted(unknown))}{hint}")
     return cls(**values)
 
 
@@ -129,9 +132,11 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         raise ConfigError("catalogue.workers must be at least 1")
 
     notify = _known(NotifyConfig, _section(data, "notify"), "notify")
+    if not isinstance(notify.events, list) or not all(isinstance(e, str) for e in notify.events):
+        raise ConfigError("notify.events must be a list of event names, e.g. [finished, error]")
 
     known_top = {"timezone", "manifest", "log_dir", "reports_dir", "sources", "catalogue", "notify"}
-    unknown = set(data) - known_top
+    unknown = {str(k) for k in data} - known_top
     if unknown:
         raise ConfigError(f"Unknown top-level key(s): {', '.join(sorted(unknown))}")
 

@@ -46,7 +46,7 @@ silently ignored.
 | `apprise_url` | `""` | Base URL of your Apprise API server |
 | `apprise_key` | `""` | The Apprise config key that routes to your services |
 | `tags` | `""` | Optional Apprise tag(s) |
-| `on` | `[finished, error]` | Events that send a notification |
+| `events` | `[finished, error]` | Events that send a notification |
 
 Notifications are off unless both `apprise_url` and `apprise_key` are set. See
 [Notifications](notifications.md).

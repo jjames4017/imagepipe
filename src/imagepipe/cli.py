@@ -107,10 +107,10 @@ def cmd_notify_test(cfg, args) -> int:
     if not cfg.notify.enabled:
         print("Notifications are not configured (notify.apprise_url and notify.apprise_key).", file=sys.stderr)
         return 1
-    events = cfg.notify.on
-    cfg.notify.on = ["test"]
+    events = cfg.notify.events
+    cfg.notify.events = ["test"]
     ok = notify.send(cfg.notify, "test", "ImagePipe test", "If you can read this, notifications work.", "info")
-    cfg.notify.on = events
+    cfg.notify.events = events
     print("Sent." if ok else "Failed - see the log for the reason.", file=sys.stderr)
     return 0 if ok else 1
 

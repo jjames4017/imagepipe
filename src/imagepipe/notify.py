@@ -16,7 +16,7 @@ TYPES = {"info", "success", "warning", "failure"}
 
 def send(cfg: NotifyConfig, event: str, title: str, body: str, kind: str = "info") -> bool:
     """POST to <apprise_url>/notify/<apprise_key>. Never raises; returns True on success."""
-    if not cfg.enabled or event not in cfg.on:
+    if not cfg.enabled or event not in cfg.events:
         return False
     url = f"{cfg.apprise_url.rstrip('/')}/notify/{cfg.apprise_key}"
     payload = {"title": title, "body": body, "type": kind if kind in TYPES else "info"}

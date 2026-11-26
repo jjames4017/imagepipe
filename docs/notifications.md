@@ -33,7 +33,7 @@ imagepipe notify-test
 Later stages add `waiting` (the pipeline is paused at the digiKam stage and
 needs you).
 
-Choose which events notify with `notify.on`. A failed notification is logged
+Choose which events notify with `notify.events`. A failed notification is logged
 and never stops a run.
 
 ## What ImagePipe sends
