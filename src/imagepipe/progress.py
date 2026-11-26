@@ -8,6 +8,7 @@ query is running. Output goes to stderr, never to a pipe that is thrown away.
 
 from __future__ import annotations
 
+import collections
 import logging
 import os
 import sys
@@ -15,6 +16,12 @@ import threading
 import time
 
 log = logging.getLogger("imagepipe")
+
+# The rate and ETA use the last few minutes, so a slow patch early on doesn't keep
+# the ETA climbing for the rest of the run. Until a run is WARMUP seconds old the
+# average since the start is used.
+RATE_WINDOW = 180.0
+WARMUP = 30.0
 
 
 def fmt_duration(seconds: float | None) -> str:
@@ -58,6 +65,7 @@ class Progress:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._last_log = self.start
+        self._samples: collections.deque = collections.deque()  # (time, count, bytes)
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._render()
         self._thread.start()
@@ -93,9 +101,9 @@ class Progress:
     def line(self) -> str:
         with self._lock:
             count, nbytes, extra = self.count, self.bytes, self.extra
-        elapsed = time.monotonic() - self.start
-        rate = count / elapsed if elapsed > 0 else 0.0
-        bps = nbytes / elapsed if elapsed > 0 else 0.0
+        now = time.monotonic()
+        elapsed = now - self.start
+        rate, bps = self._rates(now, elapsed, count, nbytes)
         parts = [f"[{self.label}]"]
         if self.total is not None:
             pct = (count / self.total * 100) if self.total else 100.0
@@ -121,6 +129,19 @@ class Progress:
         if extra:
             parts.append(extra)
         return " | ".join(parts)
+
+    def _rates(self, now: float, elapsed: float, count: int, nbytes: int) -> tuple[float, float]:
+        """Items/s and bytes/s over the last RATE_WINDOW seconds (whole run while warming up)."""
+        with self._lock:
+            samples = self._samples
+            samples.append((now, count, nbytes))
+            while len(samples) > 2 and samples[1][0] <= now - RATE_WINDOW:
+                samples.popleft()
+            t0, c0, b0 = samples[0]
+        if elapsed < WARMUP or now - t0 < WARMUP:
+            return (count / elapsed, nbytes / elapsed) if elapsed > 0 else (0.0, 0.0)
+        span = now - t0
+        return (count - c0) / span, (nbytes - b0) / span
 
     def _render(self, final: bool = False) -> None:
         text = self.line()
