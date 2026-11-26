@@ -208,6 +208,16 @@ def test_takeout_candidates():
     assert "IMG_1(1).jpg" in takeout_candidates("IMG_1.jpg(1).json", None)
 
 
+def test_embed_is_off_by_default(env):
+    cfg, vault = env
+    from imagepipe.triage.config import parse_triage
+
+    raw = {"database": "/t/db", "log_dir": "/t/l", "reports_dir": "/t/r", "work_dir": "/w",
+           "sources": [{"name": "s", "path": "/s"}],
+           "destinations": {"imagepipe": "/a", "docupipe": "/b", "sorted": "/c", "quarantine": "/d"}}
+    assert parse_triage(raw).embed_metadata == []
+
+
 def test_config_rejects_overlap(tmp_path):
     p = tmp_path / "c.yml"
     p.write_text(f"""

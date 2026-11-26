@@ -74,23 +74,21 @@ real one.
 name with their own extension, so they stay paired:
 `IP..._2014-07-12_Bali.jpg` + `IP..._2014-07-12_Bali.xmp` + `IP..._2014-07-12_Bali.jpg.json`.
 
-## Tags written into files
+## Nothing is written into the files
 
-After moving, the pipeline ID and the original location are written into files
-that can carry them, keeping their modified time:
+Triage does not change file contents. Each file's pipeline ID is at the front
+of its new name and in the triage database, with its original location. So
+exact duplicates stay byte-identical, and nothing is rewritten twice:
 
-- `XMP-dc:Identifier` = the pipeline ID
-- `XMP-dc:Source` = where the file was found (`archive.zip::member` for files from archives)
+- photos: ImagePipe stage 2 reads the ID from the file name and writes it into
+  the file (`XMP-dc:Identifier`) together with its other tags
+- documents: reviewed in `docupipe`, then Paperless takes over
 
-By default this is done for images and PDFs (`embed_metadata`). RAW files are
-never written to. A file that exiftool can't write (e.g. BMP, a damaged PDF) is
-recorded as `tags-failed` and keeps its information in its name and the
-database.
-
-Writing tags changes a file's bytes: two identical photos are no longer
-byte-identical afterwards (their IDs differ). ImagePipe still finds them -
-its exact-dupe check also compares pixels - and the triage database keeps each
-file's SHA-256 from before (`sha256`) and after (`sha256_final`).
+If you do want triage to write the ID (`XMP-dc:Identifier`) and original
+location (`XMP-dc:Source`) into files, list the kinds in `embed_metadata`
+(`image`, `pdf`, `video`). This rewrites every such file and reads it back, and
+the file's SHA-256 after tagging is recorded as `sha256_final`. RAW files are
+never written to.
 
 ## How files are moved safely
 
@@ -183,7 +181,7 @@ them; mount `/wolf-pool/vault` at the same path so they match the host.
 | `destinations` | required | `imagepipe`, `docupipe`, `sorted`, `quarantine` |
 | `workers` | 8 | Parallel readers |
 | `verify` | `auto` | `auto`: inode check for same-disk moves, SHA-256 for copies. `hash`: SHA-256 always |
-| `embed_metadata` | `[image, pdf]` | Kinds to write the ID into (`image`, `pdf`, `video`) |
+| `embed_metadata` | `[]` (off) | Kinds to write the ID into (`image`, `pdf`, `video`) - see above |
 | `reverse_geocode` | `true` | GPS to place name |
 | `day_first` | `true` | `03-04-2015` in a name means 3 April |
 | `live_photo_max_bytes` | `20MB` | Largest video treated as a Live Photo clip |
@@ -199,7 +197,7 @@ Destinations, `work_dir` and sources must not sit inside each other.
 All are in the Docker image:
 
 - Python 3.11+, Pillow, PyYAML (required)
-- exiftool - dates/GPS from RAW, video, audio and PDF; writing tags
+- exiftool - dates/GPS from RAW, video, audio and PDF (and writing tags, if turned on)
 - 7-Zip (`7zz` or `7z`) - `.7z`, `.rar`, `.cab`
 - `reverse_geocoder` (`pip install imagepipe[triage]`) - offline GPS to place name
 - `pillow-heif` - HEIC photos

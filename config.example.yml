@@ -55,7 +55,8 @@ triage:
     quarantine: /wolf-pool/vault/quarantine   # quarantine/<reason>/: unknown-type, corrupt, encrypted, archive-failed, zero-byte, system-junk
   workers: 8                                  # parallel readers during scan
   verify: auto                                # auto: inode check for same-disk moves, SHA-256 for copies | hash: always SHA-256
-  embed_metadata: [image, pdf]                # write the ID + original location into these kinds (image, pdf, video)
+  embed_metadata: []                          # off: files are not rewritten; the ID is in the name and the database.
+                                              # ImagePipe stage 2 writes it into each photo. Can list image, pdf, video
   reverse_geocode: true                       # turn GPS into a place name for the smartname (offline)
   day_first: true                             # 03-04-2015 in a name means 3 April
   live_photo_max_bytes: 20MB                  # a video this size or smaller beside a same-named photo travels with it

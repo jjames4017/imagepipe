@@ -45,7 +45,7 @@ class TriageConfig:
     destinations: dict[str, Path]
     workers: int = 8
     verify: str = "auto"
-    embed_metadata: list[str] = field(default_factory=lambda: ["image", "pdf"])
+    embed_metadata: list[str] = field(default_factory=list)  # off: ImagePipe stage 2 writes the ID
     reverse_geocode: bool = True
     day_first: bool = True
     live_photo_max_bytes: int = 20 << 20
@@ -111,7 +111,7 @@ def parse_triage(data: dict | None) -> TriageConfig | None:
         if bucket not in BUCKETS:
             raise ConfigError(f"triage.bucket_overrides['{ext}']: '{bucket}' is not one of {', '.join(BUCKETS)}")
 
-    embed = data.get("embed_metadata", ["image", "pdf"]) or []
+    embed = data.get("embed_metadata") or []
     bad = set(embed) - set(EMBED_KINDS)
     if bad:
         raise ConfigError(f"triage.embed_metadata can only list: {', '.join(EMBED_KINDS)}")
