@@ -9,7 +9,7 @@ one place:
 |---|---|
 | `imagepipe/` | Photos and RAW files, with their sidecars (XMP, AAE, Google Takeout JSON) and Live Photo clips. Exact duplicates all go - ImagePipe dedupes them |
 | `docupipe/` | Documents and PDFs, staged for review before Paperless. Duplicates all go |
-| `sorted/<type>/` | `video`, `audio`, `software`, `disk-images`, `email`, `ebooks`, `code`, `fonts`, `other-known`. Duplicates all go |
+| `sorted/<type>/` | `video`, `audio`, `software`, `disk-images`, `email`, `ebooks`, `code`, `fonts`, `other-known`, `web-pages`. Duplicates all go |
 | `quarantine/<reason>/` | `unknown-type`, `corrupt`, `encrypted`, `archive-failed`, `zero-byte`, `system-junk` |
 
 Archives are extracted, every file inside is checked, the contents are sorted
@@ -61,7 +61,9 @@ then **Scan**.
 
 ## New names
 
-`<ID>_<date>_<smartname>.<ext>` - the extension is kept, lower-cased.
+`<ID>_<date>_<smartname>.<ext>` - the extension is kept, lower-cased. An odd
+extension (spaces or symbols, e.g. `.xls whakapapa`) is not used as an
+extension; it becomes part of the smartname.
 
 **ID** - see [Pipeline ID](../design.md#pipeline-id). An ID already at the
 front of a file name is kept.
@@ -74,14 +76,27 @@ front of a file name is kept.
    year-month or year; `2014/07/` folders combine to `2014-07`
 4. the file's modified time
 
+When the date comes from inside the file, a sidecar or the file name and a time
+is known, the time is added: `2016-05-15_064331` (or `_0643` without seconds).
+Dates from folder names or the modified time have no time, and a time of
+exactly 00:00:00 counts as none. In a file name only a time straight after the
+date counts (`IMG_20190429_164338`, `WP_20160515_06_43_31`); other digit runs
+are counters.
+
 **Smartname**: a place name from GPS if there is one (offline lookup, e.g.
 `Hoi-An-VN`), then either the file's own title (PDF/Office title, photo
 caption, Takeout description) or the meaningful folder names (up to two, e.g.
 `Fiji-day1`) plus the file name if it is descriptive. Camera names
 (`IMG_1234`, `DSC01234`, `PXL_...`), generic folders (`DCIM`, `100APPLE`,
-`Camera Roll`, `New Folder`, `batch_0042` ...) and dates are left out. If
-nothing is left, the original file name is used. Smartnames never contain `_`
-or `.`, so a name always splits cleanly into its three parts.
+`Camera Roll`, `New Folder`, `batch_0042` ...) and dates (with any time
+straight after them) are left out. If nothing is left, the original file name
+is used.
+
+Smartnames contain only letters (accented letters and macrons kept, e.g. `ā`),
+digits and hyphens: `&` becomes `and`, and brackets, commas, apostrophes, `@`
+and every other symbol are removed (`logo_top (3)` -> `logo-top-3`). A name cut
+to `smartname_max_length` is cut at a hyphen, never mid-word. Smartnames never
+contain `_` or `.`, so the ID is always everything before the first `_`.
 
 Where the date and smartname came from is recorded for every file
 (`date_source`, `smartname_source`), so a guessed date is never mistaken for a
@@ -127,6 +142,12 @@ Supported: `.zip`, `.tar`, `.tgz`/`.tar.gz`, `.tar.bz2`, `.tar.xz`, single
 that aren't really archives (`.docx`, `.epub`, `.cbz`, `.apk`, `.jar` ...) are
 not extracted.
 
+Only files with a real archive extension (`.zip`, `.rar`, `.7z`, `.tar`,
+`.tgz`, `.tbz2`, `.txz`, `.gz`, `.bz2`, `.xz`, `.cab`) are extracted. Zip or
+other archive content under any other extension that triage doesn't know
+(`.xlsm`, `.dotx`, `.vsdx`, `.odg`, `.xps`, `.zed`, `.ftmb` ...) goes to
+`quarantine/unknown-type` whole, so the original is never unpacked and deleted.
+
 1. Extracted into `work_dir/<archive ID>/`. Paths are cleaned so nothing can
    land outside that folder; links are refused.
 2. Checked: zip CRC-32 and sizes, tar sizes, gz/bz2/xz checksums, 7-Zip's own
@@ -154,6 +175,18 @@ nested too deep goes to `quarantine/archive-failed` - untouched.
   saved under an Office extension, is a normal document and goes to
   `docupipe`. An Office file that looks like a zip but is damaged is still
   reported as a problem.
+- **Saved web pages**: a page (`Page.htm`/`.html`) and its `Page_files` folder
+  go together to `sorted/web-pages`. The page gets an ID name (rule
+  `web-page`); the `Page_files` folder and everything in it keep their
+  original names (rule `web-page-files`), so the page's links still work.
+  `.mht`/`.mhtml` pages go there too. A `_files` folder without its page counts
+  only if it holds web files (`.css`, `.js`, `.htm`), so an ordinary folder
+  named e.g. `my_files` is not caught. An `.htm` with no `_files` folder is a
+  normal document.
+- **Application and genealogy files** (`.ftw`, `.gno`, `.fbk`, `.mpp`, `.vsd`,
+  `.pub`, `.tcw`, `.hmk`, `.cl3`, `.obd`) go to `sorted/other-known`.
+- **Temporary, partial-download and automatic backup files** (`.tmp`,
+  `.crdownload`, `.asd`, `.wbk`) go to `quarantine/system-junk`.
 - **Photoshop files** (`.psd`, `.psb`): Pillow can't open most of them, so the
   width and height come from the Photoshop header and the date and title from
   exiftool (when installed). They go to `imagepipe` like other images.
@@ -203,14 +236,18 @@ The bucket for each file, in order:
 | `.DS_Store`, `Thumbs.db`, `desktop.ini`, `._*` and similar | `quarantine/system-junk` |
 | can't be read | `quarantine/corrupt` |
 | extension listed in `bucket_overrides` | as configured |
+| `.tmp`, `.crdownload`, `.asd`, `.wbk` | `quarantine/system-junk` |
 | the extension promises an image/RAW/video/audio/PDF but the contents are text, HTML or unknown | `quarantine/corrupt` |
 | image or RAW | `imagepipe` |
 | XMP/AAE/THM sidecar, Takeout JSON | with its photo; `imagepipe` if its photo isn't found |
 | short video beside a same-named photo (Live Photo) | with its photo |
 | PDF | `docupipe` |
-| Word, Excel, PowerPoint, OpenDocument, Pages/Numbers/Keynote, RTF, text, Markdown, CSV, HTML | `docupipe` |
+| saved web page and its `_files` folder, `.mht` | `sorted/web-pages` |
+| Word, Excel, PowerPoint, OpenDocument, Pages/Numbers/Keynote, RTF, text, Markdown, CSV, HTML (by extension) | `docupipe` |
+| document content under an extension triage doesn't know (e.g. `.tibuq6`) | `quarantine/unknown-type` |
 | video, audio | `sorted/video`, `sorted/audio` |
-| archive | extracted (see above) |
+| archive with a real archive extension | extracted (see above) |
+| archive content under any other unknown extension | `quarantine/unknown-type` |
 | known extension (email, ebooks, software, disk images, fonts, code, other known data files) | `sorted/<type>` |
 | anything else | `quarantine/unknown-type` |
 

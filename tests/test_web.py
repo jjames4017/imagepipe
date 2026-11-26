@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import threading
 import time
 import urllib.error
@@ -107,3 +108,32 @@ def test_run_scan_plan_and_review(web):
 def test_bad_limit_rejected(web):
     base, *_ = web
     assert "whole number" in post(base, "/api/job/start", {"kind": "triage-apply", "options": {"limit": "1; rm"}})["error"]
+
+
+def test_delete_reports(web):
+    base, cfg, vault, app = web
+    rep = cfg.triage.reports_dir
+    (rep / "plan-1").mkdir(parents=True, exist_ok=True)
+    (rep / "plan-1" / "summary.md").write_text("x")
+    (rep / "plan-1" / "plan.csv").write_text("a,b\n")
+    (rep / "actions.csv").write_text("ts,action\n")
+    cfg.triage.log_dir.mkdir(parents=True, exist_ok=True)
+    log = cfg.triage.log_dir / "triage-2026-11-26.log"
+    log.write_text("hello\n")
+    listed = {f["path"]: f for f in get(base, "/api/reports")}
+    assert listed[str(rep / "actions.csv")]["protected"] and not listed[str(log)]["protected"]
+
+    r = post(base, "/api/reports/delete", {"paths": [str(log), "/etc/passwd", str(rep / "actions.csv")]})
+    assert r["ok"] and r["deleted"] == 1 and not log.exists()
+    assert {x["why"] for x in r["skipped"]} == {"not a log or report", "audit trail - kept"}
+    assert (rep / "actions.csv").exists() and Path("/etc/passwd").exists()
+
+    r = post(base, "/api/reports/delete", {"all": True})
+    assert r["ok"] and r["deleted"] >= 2
+    assert not (rep / "plan-1").exists()  # emptied folder removed
+    assert (rep / "actions.csv").exists()
+    assert rep.is_dir()  # roots themselves stay
+
+    app.runner.job = {"status": "running"}
+    assert "job is running" in post(base, "/api/reports/delete", {"all": True})["error"]
+    app.runner.job = None

@@ -17,6 +17,12 @@ DOCUPIPE_EXT = {
     "ppt", "pptx", "pps", "ppsx", "odp", "key",
     "html", "htm", "mht", "mhtml",
 }
+# Only these are extracted. Zip (or other archive) content under any other
+# extension is not an archive to unpack: .xlsm, .vsdx, .zed ... would lose the original.
+ARCHIVE_EXTRACT_EXT = {"zip", "rar", "7z", "tar", "tgz", "tbz2", "txz", "gz", "bz2", "xz", "cab"}
+# Temporary, partial-download and automatic backup files: quarantined as junk.
+JUNK_EXT = {"tmp", "crdownload", "asd", "wbk"}
+
 EXT_BUCKET = {}
 for _bucket, _exts in {
     "sorted/email": {"eml", "msg", "emlx", "mbox", "mbx", "pst", "ost", "olm"},
@@ -36,7 +42,10 @@ for _bucket, _exts in {
                      "wmv", "asf", "flv", "vob", "mod", "tod", "divx", "ogv", "rm", "rmvb", "swf"},
     "sorted/other-known": {"json", "xml", "log", "vcf", "ics", "kml", "kmz", "gpx", "plist", "db", "sqlite",
                            "sqlite3", "mdb", "accdb", "torrent", "url", "webloc", "lnk", "bak", "dat", "nfo",
-                           "srt", "sub", "vtt", "ass", "cue", "m3u", "m3u8", "pls", "reg", "pem", "crt", "key"},
+                           "srt", "sub", "vtt", "ass", "cue", "m3u", "m3u8", "pls", "reg", "pem", "crt", "key",
+                           # application and genealogy files (Family Tree Maker, GenoPro, Project, Visio,
+                           # Publisher ...): kept, but not documents for Paperless
+                           "ftw", "gno", "fbk", "mpp", "vsd", "pub", "tcw", "hmk", "cl3", "obd"},
 }.items():
     for _e in _exts:
         EXT_BUCKET.setdefault(_e, _bucket)
@@ -78,6 +87,8 @@ def classify(row, overrides: dict[str, str]) -> tuple[str, str]:
         return "quarantine/corrupt", "unreadable"
     if ext in overrides:
         return overrides[ext], f"override:{ext}"
+    if ext in JUNK_EXT:
+        return "quarantine/system-junk", f"temp-or-backup-{ext}"
 
     if mime == "text/plain" and EXT_BUCKET.get(ext) in ("sorted/code", "sorted/other-known"):
         return EXT_BUCKET[ext], f"ext-{ext}"  # e.g. a TypeScript .ts file, not an MPEG-TS video
@@ -97,10 +108,9 @@ def classify(row, overrides: dict[str, str]) -> tuple[str, str]:
     if kind == "archive":
         if ext in EXT_BUCKET:  # zip-based ebooks/software (.cbz, .apk, .jar ...)
             return EXT_BUCKET[ext], f"zip-based-{ext}"
-        if mime in ("application/vnd.rar", "application/x-7z-compressed", "application/vnd.ms-cab-compressed") \
-                or ext in ("zip", "rar", "7z", "tar", "tgz", "tbz2", "txz", "gz", "bz2", "xz", "cab") \
-                or mime == "application/zip":
-            return "extract", f"archive-{ext or mime.rsplit('/', 1)[-1]}"
+        if ext in ARCHIVE_EXTRACT_EXT:
+            return "extract", f"archive-{ext}"
+        return "quarantine/unknown-type", "unrecognised-extension"
     if kind == "document":
         if row["encrypted"]:  # password-protected Office file
             return "quarantine/encrypted", "encrypted-document"
@@ -108,10 +118,9 @@ def classify(row, overrides: dict[str, str]) -> tuple[str, str]:
             return "imagepipe", "takeout-json-unmatched"
         if ext in EXT_BUCKET:
             return EXT_BUCKET[ext], f"ext-{ext}"
-        if ext in DOCUPIPE_EXT or mime.startswith("application/vnd.openxmlformats") or mime in (
-                "application/rtf", "application/x-ole-storage", "text/html", "text/plain"):
-            return "docupipe", f"document-{ext or 'text'}"
-        return "docupipe", "document"
+        if ext in DOCUPIPE_EXT:
+            return "docupipe", f"document-{ext}"
+        return "quarantine/unknown-type", "unrecognised-extension"
     # unknown content
     if ext in EXT_BUCKET:
         return EXT_BUCKET[ext], f"ext-{ext}"

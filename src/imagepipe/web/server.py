@@ -325,7 +325,7 @@ class App:
                 out.append(r)
         return out
 
-    def reports(self) -> list[dict]:
+    def reports(self, limit: int | None = 300) -> list[dict]:
         files = []
         for root in self.report_roots():
             if not root.is_dir():
@@ -334,9 +334,45 @@ class App:
                 if p.is_file() and p.suffix in (".md", ".csv", ".log", ".txt"):
                     st = p.stat()
                     files.append({"path": str(p), "name": str(p.relative_to(root)), "root": str(root),
-                                  "size": st.st_size, "mtime": st.st_mtime})
+                                  "size": st.st_size, "mtime": st.st_mtime,
+                                  "protected": p.name in self.PROTECTED_NAMES})
         files.sort(key=lambda f: f["mtime"], reverse=True)
-        return files[:300]
+        return files if limit is None else files[:limit]
+
+    PROTECTED_NAMES = {"actions.csv"}  # the audit trail; never deleted from the Reports tab
+
+    def delete_reports(self, paths: list[str] | None = None, everything: bool = False) -> dict:
+        """Delete listed logs/reports - the given ones, or all of them. Returns counts."""
+        job = self.runner.job
+        if job is not None and job["status"] in ("running", "stopping"):
+            raise RuntimeError("A job is running. Wait for it to finish before deleting logs.")
+        if everything:
+            targets = [f["path"] for f in self.reports(limit=None)]
+        else:
+            targets = list(paths or [])
+        deleted, skipped, freed = 0, [], 0
+        for path in targets:
+            p = self.allowed_file(path)
+            if p is None:
+                skipped.append({"path": path, "why": "not a log or report"})
+                continue
+            if p.name in self.PROTECTED_NAMES:
+                skipped.append({"path": str(p), "why": "audit trail - kept"})
+                continue
+            size = p.stat().st_size
+            p.unlink()
+            deleted += 1
+            freed += size
+        # remove folders left empty (e.g. plan-<time>/), never the roots themselves
+        for root in self.report_roots():
+            if not root.is_dir():
+                continue
+            for d in sorted((x for x in root.rglob("*") if x.is_dir()), key=lambda x: len(x.parts), reverse=True):
+                try:
+                    d.rmdir()
+                except OSError:
+                    pass
+        return {"ok": True, "deleted": deleted, "freed": freed, "skipped": skipped}
 
     def allowed_file(self, path: str) -> Path | None:
         p = Path(os.path.realpath(path))
@@ -438,6 +474,8 @@ def make_handler(app: App):
                     self._json(app.save_config_data(body.get("data") or {}))
                 elif url.path == "/api/config/raw":
                     self._json(app.save_config_text(body.get("text") or ""))
+                elif url.path == "/api/reports/delete":
+                    self._json(app.delete_reports(body.get("paths") or [], everything=bool(body.get("all"))))
                 else:
                     self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             except (RuntimeError, ValueError) as exc:

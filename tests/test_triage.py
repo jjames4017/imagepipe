@@ -272,7 +272,7 @@ def test_plan_moves_nothing_and_names_files(env):
     pxl = r["photos:Takeout/Google Photos/Trip to Hoi An/PXL_20221003_101010123.jpg"]
     tj = r["photos:Takeout/Google Photos/Trip to Hoi An/PXL_20221003_101010123.jpg.supplemental-metad.json"]
     assert tj["companion_of"] == pxl["id"] and tj["dest_path"] == pxl["dest_path"] + ".json"
-    assert pxl["date_source"] == "sidecar-takeout" and pxl["name_date"] == "2022-10-03"
+    assert pxl["date_source"] == "sidecar-takeout" and pxl["name_date"] == "2022-10-03_101010"
     if HAS_GEO:
         assert pxl["smartname"].startswith("Hoi-An-VN")
 
@@ -287,7 +287,7 @@ def test_plan_moves_nothing_and_names_files(env):
     assert r["photos:misc/clip.mp4"]["dest_path"].startswith(str(vault / "sorted" / "video" / "photos" / "misc"))
 
     letter = r["file-cabinet:letters/letter.docx"]
-    assert letter["bucket"] == "docupipe" and letter["name_date"] == "2016-03-04"
+    assert letter["bucket"] == "docupipe" and letter["name_date"] == "2016-03-04_050607"
     assert letter["smartname"] == "Letter-to-the-Council"
     assert Path(letter["dest_path"]).parent == vault / "docupipe" / "file cabinet" / "letters"
     receipt = r["file-cabinet:Tax/2019/receipt.pdf"]
@@ -617,3 +617,109 @@ def test_web_scan_reread_argv():
         "triage", "scan", "--source", "photos", "--reread-problems"]
     assert build_argv("triage-scan", {"reread": "all"}) == ["triage", "scan", "--reread-all"]
     assert build_argv("triage-scan", {"reread": "junk"}) == ["triage", "scan"]
+
+
+# ------------------------------------------------- #16 routing decisions
+def _row(**kw):
+    base = dict(kind="document", ext="", mime="", catalogue_error=None, ext_mismatch=0, encrypted=0,
+                takeout_title=None)
+    return base | kw
+
+
+def test_routing_decisions():
+    from imagepipe.triage.kinds import classify
+
+    zipped = dict(kind="archive", mime="application/zip")
+    for ext in ("zip", "7z", "rar", "tar", "gz", "cab"):
+        assert classify(_row(**zipped, ext=ext), {})[0] == "extract", ext
+    for ext in ("xlsm", "dotx", "potx", "xltx", "xlsb", "vsdx", "vstx", "vssx", "odg", "oxps", "xps", "idml",
+                "onepkg", "zed", "uzed", "ftmb", "doc", "xls", "webarchive", ""):
+        assert classify(_row(**zipped, ext=ext), {}) == ("quarantine/unknown-type", "unrecognised-extension"), ext
+    assert classify(_row(**zipped, ext="kmz"), {})[0] == "sorted/other-known"  # known zip-based types unchanged
+    ole = dict(mime="application/x-ole-storage")
+    for ext in ("ftw", "gno", "fbk", "mpp", "vsd", "pub", "tcw", "hmk", "cl3", "obd"):
+        assert classify(_row(**ole, ext=ext), {})[0] == "sorted/other-known", ext
+    for ext in ("tmp", "crdownload", "asd", "wbk"):
+        assert classify(_row(**ole, ext=ext), {}) == ("quarantine/system-junk", f"temp-or-backup-{ext}"), ext
+    assert classify(_row(**zipped, ext="crdownload"), {})[0] == "quarantine/system-junk"
+    for ext in ("tibuq6", "no1doc", "xls whakapapa", ""):
+        assert classify(_row(**ole, ext=ext), {}) == ("quarantine/unknown-type", "unrecognised-extension"), ext
+    assert classify(_row(**ole, ext="doc"), {}) == ("docupipe", "document-doc")
+
+
+def test_odd_extension_not_used_in_new_name():
+    from imagepipe.triage.naming import build_name
+
+    assert build_name("IPX", "2001", "Tree", "xls whakapapa") == "IPX_2001_Tree-xls-whakapapa"
+    assert build_name("IPX", "2001", "Tree", "doc") == "IPX_2001_Tree.doc"
+
+
+# ------------------------------------------------- #18 smartname characters
+def test_smartname_characters_and_cut():
+    from imagepipe.triage.naming import clean_part, cut_at_hyphen, smartname
+
+    assert clean_part("logo_top (3)") == "logo-top-3"
+    assert clean_part("Letters & Envelopes") == "Letters-and-Envelopes"
+    assert clean_part("Ann Dansey, Bill & Reima Hall 2") == "Ann-Dansey-Bill-and-Reima-Hall-2"
+    assert clean_part("picnan's94thbirthday") == "picnan-s94thbirthday"
+    assert clean_part("Andrew Kusabs (Andrew@kusabs.co.nz)") == "Andrew-Kusabs-Andrew-kusabs-co-nz"
+    assert clean_part("Māori whakapapa – Ōtaki [draft] #2!") == "Māori-whakapapa-Ōtaki-draft-2"
+    assert clean_part("bad\udc80bytes") == "bad-bytes"
+    assert cut_at_hyphen("Andrew-Kusabs-Andrew-kusabs", 18) == "Andrew-Kusabs"
+    assert cut_at_hyphen("Andrew-Kusabs-Andrew", 13) == "Andrew-Kusabs"
+    assert cut_at_hyphen("Supercalifragilistic", 5) == "Super"
+    name, _ = smartname(None, None, ["Letters & Envelopes"], "Colleens Address (big) envelope", 30)
+    assert name == "Letters-and-Envelopes-Colleens"
+
+
+# ------------------------------------------------- #19 time in names
+def test_time_in_name_date_and_not_in_smartname():
+    from imagepipe.triage.naming import date_from_path, descriptive_filename, name_date_of, smartname
+
+    assert name_date_of("2016-05-15 06:43:31") == "2016-05-15_064331"
+    assert name_date_of("2016-05-15 00:00:00") == "2016-05-15"
+    assert name_date_of("2016-05-15") == "2016-05-15"
+    assert date_from_path("IMG_20190429_164338.jpg", []) == ("2019-04-29_164338", "filename")
+    assert date_from_path("WP_20160515_06_43_31_Pro.jpg", []) == ("2016-05-15_064331", "filename")
+    assert date_from_path("PXL_20221003_101010123.jpg", []) == ("2022-10-03_101010", "filename")
+    assert date_from_path("VID_20200101_2359.mp4", []) == ("2020-01-01_2359", "filename")
+    assert date_from_path("scan 20190429 1234567.pdf", []) == ("2019-04-29", "filename")  # a counter, not a time
+    assert date_from_path("x.jpg", ["2019", "Bali 2019-07-03 101010"]) == ("2019-07-03", "folder")  # folders: no time
+    assert descriptive_filename("WP_20160515_06_43_31_Pro") is None  # camera name, like IMG_
+    assert descriptive_filename("Board report 20191108_0930 final") == "Board report final"
+    name, _ = smartname(None, None, ["Docs", "Review_Griffith"], "WP_20160515_06_43_31_Pro")
+    assert "06" not in name and "Pro" not in name
+
+
+# ------------------------------------------------- #17 saved web pages
+def test_saved_web_pages_stay_together(env):
+    cfg, vault = env
+    html = b"<!DOCTYPE html><html><head><title>Gwlad</title></head><body><img src='Gwlad_files/logo.gif'></body></html>"
+    build(vault / "file cabinet", {
+        "Genealogy/Gwlad.htm": html,
+        "Genealogy/Gwlad_files/logo_top (3).gif": jpeg(),
+        "Genealogy/Gwlad_files/style.css": b"body { color: red; }\n",
+        "Genealogy/Gwlad_files/sub/deep.jpg": jpeg(),
+        "Genealogy/Lonely.html": html,
+        "Saved/Old page_files/a.css": b"p { margin: 0; }\n",
+        "Saved/Old page_files/pic.jpg": jpeg(),
+        "Mine/my_files/holiday.jpg": jpeg(),
+        "Saved/Whole page.mht": b"From: <Saved by Windows Internet Explorer>\r\nMIME-Version: 1.0\r\n\r\nhello\r\n",
+    })
+    assert run_scan(cfg, cfg.triage.source("file-cabinet"))["status"] == "finished"
+    assert run_plan(cfg)["status"] == "finished"
+    r = rows(cfg)
+    root = vault / "sorted" / "web-pages" / "file cabinet"
+    page = r["file-cabinet:Genealogy/Gwlad.htm"]
+    assert page["bucket"] == "sorted/web-pages" and page["rule"] == "web-page"
+    assert Path(page["dest_path"]).parent == root / "Genealogy"
+    assert Path(page["dest_path"]).name.startswith(page["triage_id"] + "_")  # the page gets an ID name
+    for rel in ("Gwlad_files/logo_top (3).gif", "Gwlad_files/style.css", "Gwlad_files/sub/deep.jpg"):
+        x = r[f"file-cabinet:Genealogy/{rel}"]
+        assert x["bucket"] == "sorted/web-pages" and x["rule"] == "web-page-files", rel
+        assert x["dest_path"] == str(root / "Genealogy" / rel), rel  # folder and names kept
+        assert x["triage_id"]
+    assert r["file-cabinet:Genealogy/Lonely.html"]["bucket"] == "docupipe"  # no _files folder: a normal document
+    assert r["file-cabinet:Saved/Old page_files/pic.jpg"]["dest_path"] == str(root / "Saved" / "Old page_files" / "pic.jpg")
+    assert r["file-cabinet:Mine/my_files/holiday.jpg"]["bucket"] == "imagepipe"  # not a web folder
+    assert r["file-cabinet:Saved/Whole page.mht"]["bucket"] == "sorted/web-pages"

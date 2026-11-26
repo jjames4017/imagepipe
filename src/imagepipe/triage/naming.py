@@ -47,11 +47,10 @@ _CAMERA_NAME_RE = re.compile(
     r"^(img|image|dsc|dscn|dscf|dsci|pxl|mvimg|vid|video|mov|p|pic|pict|picture|photo|sam|gopr|gp|gh\d|dji|wp|"
     r"scan|screenshot|screen shot|screen recording|whatsapp image|whatsapp video|signal|sdc|cimg|imag|hpim|"
     r"pano|burst|cover|edited|copy|file|document|doc|untitled|new|thumb|_mg|mg|mvi|mah|sny|kif|clip|rec)"
-    r"[\s_\-.()]*([\d\s_\-.()]|wa|edited|copy|e)*$",
+    r"[\s_\-.()]*([\d\s_\-.()]|wa|edited|copy|pro|hdr|e)*$",
     re.I,
 )
 _UUIDISH_RE = re.compile(r"^[0-9a-f]{8}(-?[0-9a-f]{4}){3}-?[0-9a-f]{12}$|^[0-9a-f\-_]{16,}$", re.I)
-_BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f\uf780-\uf7ff\udc80-\udcff]')  # incl. bytes that weren't UTF-8
 
 
 # ---------------------------------------------------------------- dates
@@ -63,6 +62,46 @@ def _valid(y: int, m: int = 1, d: int = 1) -> bool:
         return True
     except ValueError:
         return False
+
+
+# a time straight after a YYYYMMDD-style date: _164338, _06_43_31, -06-43, T10:10:10, 101010123 (ms)
+_TIME_AFTER = r"(?:[-_. T]?([01]\d|2[0-3])[-_.:]?([0-5]\d)(?:[-_.:]?([0-5]\d))?(?:\d{1,3})?(?!\d))"
+
+
+def name_date_of(meta_date: str | None) -> str | None:
+    """'2016-05-15 06:43:31' -> '2016-05-15_064331' (no time if 00:00:00 or none)."""
+    if not meta_date:
+        return None
+    date = meta_date[:10]
+    tm = meta_date[11:19]
+    if re.fullmatch(r"\d{2}:\d{2}:\d{2}", tm) and tm != "00:00:00":
+        return f"{date}_{tm.replace(':', '')}"
+    return date
+
+
+def time_after_date(text: str) -> str | None:
+    """HHMMSS (or HHMM) right after the first YYYYMMDD-style date in text, if any.
+
+    Separated (06_43_31, 06-43) or one run of exactly 4, 6 or 9 digits (2359, 164338,
+    101010123 with milliseconds); any other digit run is a counter, not a time.
+    """
+    d = re.search(r"(?<!\d)(?:19|20)\d{2}[-_. ]?\d{2}[-_. ]?\d{2}", text)
+    if not d:
+        return None
+    rest = text[d.end():]
+    m = re.match(r"[-_. T]?(\d{2})[-_.:](\d{2})(?:[-_.:](\d{2}))?(?!\d)", rest)
+    if m:
+        hh, mm, ss = m.group(1), m.group(2), m.group(3) or ""
+    else:
+        m = re.match(r"[-_. T]?(\d{4}|\d{6}|\d{9})(?!\d)", rest)
+        if not m:
+            return None
+        hh, mm, ss = m.group(1)[:2], m.group(1)[2:4], m.group(1)[4:6]
+    if not (int(hh) < 24 and int(mm) < 60 and (not ss or int(ss) < 60)):
+        return None
+    if int(hh + mm + (ss or "0")) == 0:
+        return None
+    return hh + mm + ss
 
 
 def date_in_text(text: str, day_first: bool = True) -> str | None:
@@ -108,6 +147,9 @@ def date_from_path(filename: str, folders: list[str], day_first: bool = True) ->
     stem = filename.rsplit(".", 1)[0] if "." in filename.lstrip(".") else filename
     found = date_in_text(stem, day_first)
     if found:
+        tm = time_after_date(stem) if len(found) == 10 else None
+        if tm and re.sub(r"\D", "", found) in re.sub(r"\D", "", stem):
+            found = f"{found}_{tm}"
         return found, "filename"
     for i in range(len(folders) - 1, -1, -1):
         found = date_in_text(folders[i], day_first)
@@ -130,16 +172,31 @@ def date_from_mtime(mtime: float, tz: ZoneInfo) -> str:
 
 # ---------------------------------------------------------------- smartname
 def clean_part(text: str) -> str:
-    """Make text safe for a file name on Linux, Mac and Windows (SMB)."""
+    """Letters (accents and macrons kept), digits and hyphens only; & becomes "and".
+
+    Everything else - brackets, commas, apostrophes, @, dots ... - is removed, and
+    runs of spaces/underscores/removed characters become a single hyphen.
+    """
     text = unicodedata.normalize("NFC", text)
-    text = _BAD_CHARS.sub(" ", text)
-    text = re.sub(r"[\s_.]+", "-", text.strip())  # no dots: the first dot starts the extension
-    text = re.sub(r"-{2,}", "-", text)
-    return text.strip("-. ")
+    text = text.replace("&", " and ")
+    text = "".join(ch if (ch.isalnum() or ch == "-") else " " for ch in text)
+    text = re.sub(r"[\s-]+", "-", text.strip())
+    return text.strip("-")
+
+
+def cut_at_hyphen(text: str, limit: int) -> str:
+    """Shorten to at most `limit` characters, cutting at a hyphen rather than mid-word."""
+    if len(text) <= limit:
+        return text
+    if text[limit] == "-":
+        return text[:limit].rstrip("-")
+    cut = text[:limit]
+    head = cut.rsplit("-", 1)[0] if "-" in cut else cut  # one long word: no choice but to cut it
+    return head.rstrip("-") or cut
 
 
 def _strip_dates(text: str) -> str:
-    t = re.sub(r"(?<!\d)(?:19|20)\d{2}[-_. ]?\d{2}[-_. ]?\d{2}(?!\d)", " ", text)
+    t = re.sub(r"(?<!\d)(?:19|20)\d{2}[-_. ]?\d{2}[-_. ]?\d{2}" + _TIME_AFTER + "?(?!\\d)", " ", text)
     t = re.sub(r"(?<!\d)\d{1,2}[-_. /]\d{1,2}[-_. /](?:19|20)\d{2}(?!\d)", " ", t)
     t = re.sub(r"(?<!\d)(?:19|20)\d{2}(?:[-_.]\d{2})?(?!\d)", " ", t)
     words = [w for w in re.split(r"(\s+)", t) if w.strip().lower() not in MONTHS]
@@ -194,17 +251,23 @@ def smartname(place: str | None, title: str | None, folders: list[str], stem: st
             parts.append(c)
             seen.add(c.lower())
     name = "-".join(parts) or clean_part(stem) or "file"
-    if len(name) > max_len:
-        name = name[:max_len].rstrip("-. ")
+    name = cut_at_hyphen(name, max_len)
     return name, "+".join(src for _t, src in pieces)
 
 
+_GOOD_EXT_RE = re.compile(r"^[a-z0-9_]{1,15}$")
+
+
 def build_name(pid: str, date: str, smart: str, ext: str) -> str:
+    if ext and not _GOOD_EXT_RE.match(ext):
+        # an odd "extension" (spaces, symbols, e.g. "xls whakapapa") is part of the name, not an extension
+        smart = "-".join(p for p in (smart, clean_part(ext)) if p)
+        ext = ""
     name = f"{pid}_{date}_{smart}"
     suffix = f".{ext}" if ext else ""
     # keep the whole name well inside the 255-byte limit of most file systems
     while len((name + suffix).encode("utf-8")) > 200 and len(smart) > 1:
-        smart = smart[:-1].rstrip("-. ")
+        smart = cut_at_hyphen(smart, len(smart) - 1)
         name = f"{pid}_{date}_{smart}"
     return name + suffix
 
