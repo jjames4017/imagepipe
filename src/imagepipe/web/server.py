@@ -70,6 +70,8 @@ def build_argv(job: str, opts: dict) -> list[str]:
     raise ValueError(f"Unknown job '{job}'")
 
 
+ACTIVE = ("running", "paused", "stopping")  # a job in any of these blocks starting another
+
 class JobRunner:
     """Runs one imagepipe command at a time and keeps its output."""
 
@@ -98,13 +100,15 @@ class JobRunner:
     def start(self, kind: str, opts: dict) -> dict:
         argv = build_argv(kind, opts)
         with self.lock:
-            if self.job is not None and self.job["status"] == "running":
+            if self.job is not None and self.job["status"] in ACTIVE:
                 raise RuntimeError("A job is already running. Wait for it or stop it first.")
             self.seq += 1
             job_id = f"{datetime.now():%Y%m%d-%H%M%S}-{self.seq}"
             env = dict(os.environ, PYTHONUNBUFFERED="1", IMAGEPIPE_PROGRESS_INTERVAL="1")
             cmd = [sys.executable, "-m", "imagepipe", "-c", str(self.config_path), *argv]
-            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+            # its own process group, so pause/resume reach the job's worker processes and exiftool too
+            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
+                                         start_new_session=True)
             self.job = {"id": job_id, "kind": kind, "label": JOBS.get(kind, kind), "argv": argv,
                         "status": "running", "started": datetime.now().isoformat(timespec="seconds"),
                         "finished": None, "returncode": None, "lines": [],
@@ -114,9 +118,35 @@ class JobRunner:
 
     def stop(self) -> None:
         with self.lock:
-            if self.proc is not None and self.job and self.job["status"] == "running":
+            if self.proc is not None and self.job and self.job["status"] in ("running", "paused"):
                 self.proc.send_signal(signal.SIGINT)  # the same as Ctrl+C: stops cleanly, keeps what is done
+                if self.job["status"] == "paused":
+                    self._signal_group(signal.SIGCONT)  # a paused job must run again to stop cleanly
+                    self.job["lines"].append(f"--- resumed to stop at {datetime.now():%H:%M:%S} ---")
                 self.job["status"] = "stopping"
+
+    def _signal_group(self, sig) -> None:
+        try:
+            os.killpg(os.getpgid(self.proc.pid), sig)
+        except ProcessLookupError:
+            pass
+
+    def pause(self) -> None:
+        """Freeze the job (and its workers) where it is. Nothing is lost; resume carries on."""
+        with self.lock:
+            if self.proc is None or not self.job or self.job["status"] != "running":
+                raise RuntimeError("No running job to pause.")
+            self._signal_group(signal.SIGSTOP)
+            self.job["status"] = "paused"
+            self.job["lines"].append(f"--- paused at {datetime.now():%H:%M:%S} ---")
+
+    def resume(self) -> None:
+        with self.lock:
+            if self.proc is None or not self.job or self.job["status"] != "paused":
+                raise RuntimeError("No paused job to resume.")
+            self._signal_group(signal.SIGCONT)
+            self.job["status"] = "running"
+            self.job["lines"].append(f"--- resumed at {datetime.now():%H:%M:%S} ---")
 
     def _pump(self, proc: subprocess.Popen, job: dict) -> None:
         buf = b""
@@ -344,7 +374,7 @@ class App:
     def delete_reports(self, paths: list[str] | None = None, everything: bool = False) -> dict:
         """Delete listed logs/reports - the given ones, or all of them. Returns counts."""
         job = self.runner.job
-        if job is not None and job["status"] in ("running", "stopping"):
+        if job is not None and job["status"] in ACTIVE:
             raise RuntimeError("A job is running. Wait for it to finish before deleting logs.")
         if everything:
             targets = [f["path"] for f in self.reports(limit=None)]
@@ -469,6 +499,12 @@ def make_handler(app: App):
                     self._json({"ok": True, **app.runner.start(body.get("kind", ""), body.get("options") or {})})
                 elif url.path == "/api/job/stop":
                     app.runner.stop()
+                    self._json({"ok": True})
+                elif url.path == "/api/job/pause":
+                    app.runner.pause()
+                    self._json({"ok": True})
+                elif url.path == "/api/job/resume":
+                    app.runner.resume()
                     self._json({"ok": True})
                 elif url.path == "/api/config":
                     self._json(app.save_config_data(body.get("data") or {}))

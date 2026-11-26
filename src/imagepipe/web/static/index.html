@@ -114,7 +114,8 @@
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <h2 id="jobtitle">No job running</h2>
-        <button class="b danger" id="stop" disabled>Stop</button>
+        <span><button class="b" id="pause" disabled>Pause</button>
+        <button class="b danger" id="stop" disabled>Stop</button></span>
       </div>
       <pre id="progress"></pre>
       <pre id="log"></pre>
@@ -255,15 +256,24 @@ $$("[data-job]").forEach(b => b.onclick = async () => {
   catch (e) { alert(e.message); }
 });
 $("#stop").onclick = async () => { if (confirm("Stop the running job? It stops cleanly and keeps everything done so far.")) await api("/api/job/stop", {}); };
+$("#pause").onclick = async () => {
+  try { await api($("#pause").dataset.paused === "1" ? "/api/job/resume" : "/api/job/pause", {}); }
+  catch (e) { alert(e.message); }
+  poll();
+};
 
 async function poll() {
   let s;
   try { s = await api("/api/job?since=" + lineCount); } catch { return; }
-  const j = s.job, running = j && (j.status === "running" || j.status === "stopping");
+  const j = s.job, running = j && ["running", "paused", "stopping"].includes(j.status);
   $$("[data-job]").forEach(b => b.disabled = running);
-  $("#stop").disabled = !running;
+  $("#stop").disabled = !running || j.status === "stopping";
+  const paused = j && j.status === "paused";
+  $("#pause").disabled = !j || !["running", "paused"].includes(j.status);
+  $("#pause").textContent = paused ? "Resume" : "Pause";
+  $("#pause").dataset.paused = paused ? "1" : "0";
   const chip = $("#jobchip");
-  chip.textContent = running ? `running: ${j.label}` : "idle"; chip.className = running ? "running" : "";
+  chip.textContent = running ? `${paused ? "paused" : "running"}: ${j.label}` : "idle"; chip.className = running ? "running" : "";
   if (j) {
     if (j.id !== lastJobId) { lastJobId = j.id; lineCount = 0; $("#log").textContent = ""; return poll(); }
     $("#jobtitle").innerHTML = `${esc(j.label)} <span class="pill">${esc(j.status)}</span> <span class="muted" style="font-weight:400;font-size:12px">imagepipe ${esc(j.argv.join(" "))}</span>`;

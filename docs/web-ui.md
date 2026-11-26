@@ -13,7 +13,7 @@ There is **no login**: keep it on your LAN.
 
 | Page | What it does |
 |---|---|
-| Run | Buttons for catalogue, catalogue reports/CSV, triage scan (with a choice to re-read problem files or everything), plan, apply (with an optional trial-run limit) and the notification test. Shows the running job's live progress (count, rate, ETA) and its output, with a Stop button. One job at a time |
+| Run | Buttons for catalogue, catalogue reports/CSV, triage scan (with a choice to re-read problem files or everything), plan, apply (with an optional trial-run limit) and the notification test. Shows the running job's live progress (count, rate, ETA) and its output, with **Pause**/**Resume** and **Stop** buttons. One job at a time |
 | Status | The same as `imagepipe status` and `imagepipe triage status` |
 | Plan review | Every file the last triage plan placed - from, to, bucket, rule, date and smartname and where each came from - filterable by bucket and rule, and searchable. Nothing here has moved yet |
 | Actions | Everything triage has done, newest first, filterable and searchable (the same as `actions.csv`) |
@@ -52,3 +52,16 @@ In the compose file:
 
 `imagepipe serve --port N` changes the port inside the container;
 `--host` the address it listens on (default: all).
+
+## Pausing a job
+
+**Pause** freezes the running job where it is - the job and all its worker
+processes (and exiftool) stop using CPU and disk - and **Resume** carries on
+from exactly the same point. Time spent paused doesn't count in the elapsed
+time or the ETA. Nothing is lost, but a paused job still holds its place: no
+other job can start until it is resumed or stopped. **Stop** works on a paused
+job too (it resumes it just long enough to stop cleanly).
+
+A pause lasts only while the container runs. If the container is restarted
+while a job is paused, the job ends as if stopped; scan and apply carry on from
+where they were next time, and plan starts over (keeping every ID it gave).

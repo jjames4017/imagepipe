@@ -66,6 +66,7 @@ class Progress:
         self._stop = threading.Event()
         self._last_log = self.start
         self._samples: collections.deque = collections.deque()  # (time, count, bytes)
+        self.paused = 0.0  # seconds the process spent stopped (paused) - not counted as elapsed
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._render()
         self._thread.start()
@@ -95,14 +96,24 @@ class Progress:
 
     # -- internals -------------------------------------------------------
     def _run(self) -> None:
+        last = time.monotonic()
         while not self._stop.wait(self.interval):
+            now = time.monotonic()
+            # The timer thread wakes every `interval`. If far more time went by, the process
+            # was stopped (paused with SIGSTOP or Ctrl+Z): that time isn't elapsed work time.
+            gap = now - last - self.interval
+            if gap > max(5.0, self.interval):
+                with self._lock:
+                    self.paused += gap
+                    self._samples.clear()
+            last = now
             self._render()
 
     def line(self) -> str:
         with self._lock:
             count, nbytes, extra = self.count, self.bytes, self.extra
         now = time.monotonic()
-        elapsed = now - self.start
+        elapsed = now - self.start - self.paused
         rate, bps = self._rates(now, elapsed, count, nbytes)
         parts = [f"[{self.label}]"]
         if self.total is not None:

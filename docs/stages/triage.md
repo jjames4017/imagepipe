@@ -39,6 +39,8 @@ Run them in the foreground (`docker compose run --rm imagepipe triage ...`) so
 the live progress shows. Every phase shows a running count, rate and elapsed
 time; once the total is known, a percentage and ETA. A scan or apply that is
 stopped (Ctrl+C) loses nothing and carries on from where it stopped next time.
+To pause instead, press Ctrl+Z and type `fg` to carry on (in the web UI: the
+**Pause** button).
 
 `--limit N` stops after N files (or archives): use it for a trial run.
 

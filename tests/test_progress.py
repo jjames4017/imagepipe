@@ -73,3 +73,27 @@ def test_byte_rate_uses_the_window_too(monkeypatch):
     line = p.line()
     assert "@ 100 B/s" in line, line
     p.close()
+
+
+def test_paused_time_is_not_elapsed(tmp_path):
+    import os
+    import signal
+    import subprocess
+    import sys
+    import time
+
+    script = ("import io, sys, time\n"
+              "from imagepipe.progress import Progress\n"
+              "p = Progress('Work', total=10, stream=io.StringIO(), interval=0.2)\n"
+              "print('ready', flush=True)\n"
+              "time.sleep(8)\n"
+              "print(round(p.paused), flush=True)\n"
+              "p.close()\n")
+    proc = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE, text=True)
+    assert proc.stdout.readline().strip() == "ready"
+    time.sleep(0.5)
+    os.kill(proc.pid, signal.SIGSTOP)
+    time.sleep(6)
+    os.kill(proc.pid, signal.SIGCONT)
+    out, _ = proc.communicate(timeout=30)
+    assert 5 <= int(out.strip()) <= 7, out
