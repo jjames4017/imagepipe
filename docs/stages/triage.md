@@ -42,6 +42,11 @@ stopped (Ctrl+C) loses nothing and carries on from where it stopped next time.
 
 `--limit N` stops after N files (or archives): use it for a trial run.
 
+Images with damaged EXIF (Pillow's "Corrupt EXIF data" warning) are not
+problems: the image is fine, only some EXIF details such as the date may be
+missing. The warning is not printed; the scan summary says how many images had
+damaged EXIF.
+
 ### Reading files again
 
 A scan only reads files that are new or have changed (size or modified time)

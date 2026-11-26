@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import re
 import struct
+import warnings
 import zipfile
 from datetime import datetime, timezone
 from xml.etree import ElementTree
@@ -96,7 +97,21 @@ def valid_gps(lat, lon) -> tuple[float, float] | None:
 
 
 def image_meta(path: str) -> dict:
-    """Dimensions, camera, date, GPS and title from an image, with Pillow."""
+    """Dimensions, camera, date, GPS and title from an image, with Pillow.
+
+    Pillow warns "Corrupt EXIF data" for damaged EXIF blocks. That is harmless (the
+    image is fine, only some EXIF tags are lost), so the warning is not printed;
+    the file is marked exif_damaged=1 instead and counted in the scan summary.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        out = _image_meta(path)
+    if any("exif" in str(w.message).lower() for w in caught):
+        out["exif_damaged"] = 1
+    return out
+
+
+def _image_meta(path: str) -> dict:
     out: dict = {}
     with Image.open(path) as im:
         out["width"], out["height"] = im.size

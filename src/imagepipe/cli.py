@@ -146,6 +146,9 @@ def cmd_triage_scan(cfg, args) -> int:
         body = (f"{result.get('read', 0):,} files read, {result.get('read_problems', 0):,} with problems, "
                 f"{result.get('missing', 0):,} missing. Scanned {result.get('scanned', 0):,} files "
                 f"({fmt_bytes(result.get('scanned_bytes', 0))}).")
+        if result.get("exif_damaged"):
+            body += (f" {result['exif_damaged']:,} images have damaged EXIF (harmless: the images are fine, "
+                     f"some EXIF details such as the date may be missing).")
         print(f"Source '{source.name}': {body}", file=sys.stderr)
         if result["status"] != "finished":
             notify.send(cfg.notify, "error", f"Triage scan interrupted: {source.name}", body, "warning")

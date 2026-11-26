@@ -759,3 +759,31 @@ def test_plan_folder_error_only_undoes_that_folder(env, monkeypatch):
     letter = r["file-cabinet:letters/letter.docx"]
     assert letter["status"] == "error" and letter["bucket"] is None
     assert r["file-cabinet:Tax/2019/receipt.pdf"]["status"] == "planned"
+
+
+# ------------------------------------------------- #4 damaged EXIF
+def bad_exif_jpeg() -> bytes:
+    import struct
+
+    # an IFD that says 3 entries but holds 1: Pillow warns "Corrupt EXIF data"
+    tiff = b"II*\x00" + struct.pack("<I", 8) + struct.pack("<H", 3) + struct.pack("<HHI4s", 0x0112, 3, 1, b"\x01\0\0\0")
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8)).save(buf, "JPEG", exif=b"Exif\x00\x00" + tiff)
+    return buf.getvalue()
+
+
+def test_damaged_exif_is_counted_not_printed(env, capfd):
+    from imagepipe.triage.meta import image_meta
+
+    cfg, vault = env
+    p = vault / "file cabinet" / "pics" / "bad.jpg"
+    build(vault / "file cabinet", {"pics/bad.jpg": bad_exif_jpeg(), "pics/good.jpg": jpeg()})
+    assert image_meta(str(p)).get("exif_damaged") == 1
+    assert "exif_damaged" not in image_meta(str(vault / "file cabinet" / "pics" / "good.jpg"))
+    capfd.readouterr()
+    res = run_scan(cfg, cfg.triage.source("file-cabinet"))
+    err = capfd.readouterr().err
+    assert res["status"] == "finished" and res["exif_damaged"] == 1 and res["read_problems"] == 0
+    assert "Corrupt EXIF" not in err
+    r = rows(cfg)["file-cabinet:pics/bad.jpg"]
+    assert r["catalogue_error"] is None and r["kind"] == "image"
