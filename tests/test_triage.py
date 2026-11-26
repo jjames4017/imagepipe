@@ -272,7 +272,7 @@ def test_plan_moves_nothing_and_names_files(env):
     pxl = r["photos:Takeout/Google Photos/Trip to Hoi An/PXL_20221003_101010123.jpg"]
     tj = r["photos:Takeout/Google Photos/Trip to Hoi An/PXL_20221003_101010123.jpg.supplemental-metad.json"]
     assert tj["companion_of"] == pxl["id"] and tj["dest_path"] == pxl["dest_path"] + ".json"
-    assert pxl["date_source"] == "sidecar-takeout" and pxl["name_date"] == "2022-10-03"
+    assert pxl["date_source"] == "sidecar-takeout" and pxl["name_date"] == "2022-10-03_101010"
     if HAS_GEO:
         assert pxl["smartname"].startswith("Hoi-An-VN")
 
@@ -287,7 +287,7 @@ def test_plan_moves_nothing_and_names_files(env):
     assert r["photos:misc/clip.mp4"]["dest_path"].startswith(str(vault / "sorted" / "video" / "photos" / "misc"))
 
     letter = r["file-cabinet:letters/letter.docx"]
-    assert letter["bucket"] == "docupipe" and letter["name_date"] == "2016-03-04"
+    assert letter["bucket"] == "docupipe" and letter["name_date"] == "2016-03-04_050607"
     assert letter["smartname"] == "Letter-to-the-Council"
     assert Path(letter["dest_path"]).parent == vault / "docupipe" / "file cabinet" / "letters"
     receipt = r["file-cabinet:Tax/2019/receipt.pdf"]
@@ -670,3 +670,22 @@ def test_smartname_characters_and_cut():
     assert cut_at_hyphen("Supercalifragilistic", 5) == "Super"
     name, _ = smartname(None, None, ["Letters & Envelopes"], "Colleens Address (big) envelope", 30)
     assert name == "Letters-and-Envelopes-Colleens"
+
+
+# ------------------------------------------------- #19 time in names
+def test_time_in_name_date_and_not_in_smartname():
+    from imagepipe.triage.naming import date_from_path, descriptive_filename, name_date_of, smartname
+
+    assert name_date_of("2016-05-15 06:43:31") == "2016-05-15_064331"
+    assert name_date_of("2016-05-15 00:00:00") == "2016-05-15"
+    assert name_date_of("2016-05-15") == "2016-05-15"
+    assert date_from_path("IMG_20190429_164338.jpg", []) == ("2019-04-29_164338", "filename")
+    assert date_from_path("WP_20160515_06_43_31_Pro.jpg", []) == ("2016-05-15_064331", "filename")
+    assert date_from_path("PXL_20221003_101010123.jpg", []) == ("2022-10-03_101010", "filename")
+    assert date_from_path("VID_20200101_2359.mp4", []) == ("2020-01-01_2359", "filename")
+    assert date_from_path("scan 20190429 1234567.pdf", []) == ("2019-04-29", "filename")  # a counter, not a time
+    assert date_from_path("x.jpg", ["2019", "Bali 2019-07-03 101010"]) == ("2019-07-03", "folder")  # folders: no time
+    assert descriptive_filename("WP_20160515_06_43_31_Pro") is None  # camera name, like IMG_
+    assert descriptive_filename("Board report 20191108_0930 final") == "Board report final"
+    name, _ = smartname(None, None, ["Docs", "Review_Griffith"], "WP_20160515_06_43_31_Pro")
+    assert "06" not in name and "Pro" not in name

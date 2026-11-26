@@ -23,7 +23,8 @@ from imagepipe.ids import id_from_name, new_id
 from imagepipe.progress import Progress
 from imagepipe.triage import db as tdb
 from imagepipe.triage.kinds import classify
-from imagepipe.triage.naming import (Geocoder, build_name, date_from_mtime, date_from_path, smartname)
+from imagepipe.triage.naming import (Geocoder, build_name, date_from_mtime, date_from_path, name_date_of,
+                                     smartname)
 
 log = logging.getLogger("imagepipe")
 
@@ -186,14 +187,14 @@ class Planner:
             folders = [p for p in r["dir"].split("/") if p]
             date = src = None
             if r["meta_date"] and r["meta_date_src"] in EMBEDDED_SOURCES:
-                date, src = r["meta_date"][:10], r["meta_date_src"]
+                date, src = name_date_of(r["meta_date"]), r["meta_date_src"]
             if date is None:
                 for s in side_meta.get(r["id"], []):
                     if s["meta_date"]:
-                        date, src = s["meta_date"][:10], f"sidecar-{s['meta_date_src']}"
+                        date, src = name_date_of(s["meta_date"]), f"sidecar-{s['meta_date_src']}"
                         break
             if date is None and r["meta_date"]:
-                date, src = r["meta_date"][:10], r["meta_date_src"]
+                date, src = name_date_of(r["meta_date"]), r["meta_date_src"]
             if date is None:
                 found = date_from_path(name, folders, tc.day_first)
                 if found:
