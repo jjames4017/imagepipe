@@ -276,11 +276,39 @@ def cut_at_hyphen(text: str, limit: int) -> str:
     return head.rstrip("-") or cut
 
 
-def _strip_dates(text: str) -> str:
-    t = re.sub(r"(?<!\d)(?:19|20)\d{2}[-_. ]?\d{2}[-_. ]?\d{2}" + _TIME_AFTER + "?(?!\\d)", " ", text)
-    t = re.sub(r"(?<!\d)\d{1,2}[-_. /]\d{1,2}[-_. /](?:19|20)\d{2}(?!\d)", " ", t)
-    t = re.sub(r"(?<!\d)(?:19|20)\d{2}(?:[-_.]\d{2})?(?!\d)", " ", t)
-    words = [w for w in re.split(r"(\s+)", t) if w.strip().lower() not in MONTHS]
+def _same_date(token: str, used: str) -> bool:
+    """Does the date written in `token` agree with the date used for the name, as far as both go?"""
+    d = date_in_text(token)
+    if not d:
+        return True  # not really a date we can compare: treat as matching (strip it, as before)
+    u = used[:10]
+    n = min(len(d), len(u))
+    return d[:n] == u[:n]
+
+
+def _strip_dates(text: str, used: str | None = None) -> str:
+    """Remove dates (and a time right after them) from a name.
+
+    With `used` (the date the new name carries), only dates that agree with it are
+    removed; a different date is part of what the file is about and stays (#47):
+    "Thelma Reynolds 1984" dated 2015-09-16 keeps 1984.
+    """
+    def drop(m: re.Match) -> str:
+        return " " if used is None or _same_date(m.group(0), used) else m.group(0)
+
+    month = "(?:" + _MONTH_ALT + ")"
+    t = re.sub(r"(?<!\d)(?:19|20)\d{2}[-_. ]?\d{2}[-_. ]?\d{2}" + _TIME_AFTER + "?(?!\\d)", drop, text)
+    t = re.sub(r"(?<!\d)\d{1,2}[-_. /]\d{1,2}[-_. /](?:19|20)\d{2}(?!\d)", drop, t)
+    t = re.sub(rf"(?i)(?<![a-z]){month}[\s_.-]*(?:19|20)\d{{2}}(?!\d)", drop, t)
+    t = re.sub(rf"(?i)(?<!\d)(?:19|20)\d{{2}}[\s_.-]*{month}(?![a-z])", drop, t)
+    t = re.sub(r"(?<!\d)(?:19|20)\d{2}(?:[-_.]\d{2})?(?!\d)", drop, t)
+    def lone_month_goes(w: str) -> bool:
+        m = MONTHS.get(w.strip().lower())
+        if m is None:
+            return False
+        return used is None or (len(used) >= 7 and used[5:7] == f"{m:02d}")
+
+    words = [w for w in re.split(r"(\s+)", t) if not lone_month_goes(w)]
     t = re.sub(r"\s+", " ", "".join(words)).strip(" -_.,()[]")
     # joining words left at either end once dates are gone: "2001 & 2002 papers" -> "papers" (#28)
     edge = r"(?:and|&|to|til|till|until|-|\u2013|\u2014)"
@@ -289,11 +317,11 @@ def _strip_dates(text: str) -> str:
     return t.strip(" -_.,()[]")
 
 
-def meaningful_folder(name: str) -> str | None:
+def meaningful_folder(name: str, used: str | None = None) -> str | None:
     base = name.strip()
     if not base or base.lower() in GENERIC_FOLDERS or _GENERIC_FOLDER_RE.match(base):
         return None
-    base = _strip_dates(base)
+    base = _strip_dates(base, used)
     if not base or base.lower() in GENERIC_FOLDERS or _GENERIC_FOLDER_RE.match(base):
         return None
     if not re.search(r"[^\W\d_]{2}", base):
@@ -311,12 +339,12 @@ def drop_hex_ids(text: str) -> str:
     return _HEX_ID_RE.sub(" ", text)
 
 
-def descriptive_filename(stem: str, keep_dates: bool = False) -> str | None:
+def descriptive_filename(stem: str, keep_dates: bool = False, used: str | None = None) -> str | None:
     s = stem.strip()
     if not s or _CAMERA_NAME_RE.match(s) or _UUIDISH_RE.match(s):
         return None
     if not keep_dates:
-        s = _strip_dates(s)
+        s = _strip_dates(s, used)
     s = re.sub(r"^(img|dsc|pxl|vid|scan|screenshot|whatsapp image)[\s_-]*", "", s, flags=re.I)
     s = re.sub(r"[\s_-]*(\(\d+\)|copy|edited|-e)$", "", s, flags=re.I)
     if not s or _CAMERA_NAME_RE.match(s) or not re.search(r"[^\W\d_]{3}", s):
@@ -325,7 +353,7 @@ def descriptive_filename(stem: str, keep_dates: bool = False) -> str | None:
 
 
 def smartname(place: str | None, title: str | None, folders: list[str], stem: str,
-              max_len: int = 80, keep_dates: bool = False) -> tuple[str, str]:
+              max_len: int = 80, keep_dates: bool = False, used_date: str | None = None) -> tuple[str, str]:
     """(smartname, source). Source names what it was built from, e.g. 'gps+folder'.
 
     keep_dates keeps years in the file name part (ebook titles: "Red Inferno 1945").
@@ -336,10 +364,10 @@ def smartname(place: str | None, title: str | None, folders: list[str], stem: st
     if title:
         pieces.append((title, "metadata"))
     else:
-        found = [f for f in (meaningful_folder(x) for x in folders) if f]
+        found = [f for f in (meaningful_folder(x, used_date) for x in folders) if f]
         if found:
             pieces.append(("-".join(found[-2:]), "folder"))
-        desc = descriptive_filename(stem, keep_dates)
+        desc = descriptive_filename(stem, keep_dates, used_date)
         if desc:
             pieces.append((desc, "filename"))
     if not pieces:
