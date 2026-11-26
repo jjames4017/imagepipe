@@ -15,6 +15,8 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from imagepipe.fspath import to_db
+
 SCHEMA_VERSION = 1
 
 # Status values
@@ -164,6 +166,7 @@ class TriageDB:
                to_path: str | None = None, rule: str | None = None, sha_before: str | None = None,
                sha_after: str | None = None, detail: str = "") -> None:
         """Record one action, in the database and as a line in actions.csv."""
+        from_path, to_path, detail = to_db(from_path), to_db(to_path), to_db(detail)  # any path is storable
         rec = {
             "ts": self.now(), "run_id": run_id,
             "triage_id": row["triage_id"] if row is not None else None,
@@ -191,6 +194,7 @@ class TriageDB:
         return self.db.execute("SELECT * FROM files WHERE id=?", (file_id,)).fetchone()
 
     def update(self, file_id: int, **cols) -> None:
+        cols = {k: to_db(v) if isinstance(v, str) else v for k, v in cols.items()}
         cols["updated_at"] = self.now()
         sets = ", ".join(f"{k}=?" for k in cols)
         self.db.execute(f"UPDATE files SET {sets} WHERE id=?", (*cols.values(), file_id))

@@ -130,6 +130,22 @@ nested too deep goes to `quarantine/archive-failed` - untouched.
 Before extracting, triage checks there is room in `work_dir`; if not, apply
 stops with a message rather than filling the disk.
 
+## Problems with single files
+
+One file never stops a run. If a file can't be listed, read, recorded,
+planned or moved - or an archive crashes while being extracted - that file is
+left where it is, marked `error` with the reason in the action log, and the run
+carries on with everything else. The summary and notification give the count.
+
+Only problems that affect every file stop a run: a source that isn't mounted,
+a destination that can't be written, or not enough space to extract an archive.
+
+File names that aren't valid UTF-8 (often from old Windows or Mac machines) are
+handled: the file keeps its exact original folder names at its destination, and
+its new file name is clean UTF-8 (the odd characters are left out of the
+smartname). In the database and reports these characters show as symbols from a
+private-use range (U+F780-U+F7FF).
+
 ## The record of what happened
 
 - **Triage database** (`database`): one row per file - triage ID, source,

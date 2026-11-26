@@ -137,3 +137,12 @@ def test_hash_none_then_sha256_fills_hashes(tmp_path, tree):
     result = run_catalogue(cfg, "test")
     assert result["to_read"] == len(SAMPLES) - 1  # all but the empty file
     assert all(r["sha256"] for r in rows(cfg).values() if r["size"] > 0)
+
+
+def test_catalogue_handles_names_that_are_not_utf8(cfg):
+    src = cfg.source("test").path
+    with open(os.path.join(os.fsencode(src), b"caf\xe9.jpg"), "wb") as fh:
+        fh.write(b"\xff\xd8\xff" + b"0" * 50)
+    result = run_catalogue(cfg, "test")
+    assert result["status"] == "finished"
+    assert any("caf" in k and k.endswith(".jpg") for k in rows(cfg))

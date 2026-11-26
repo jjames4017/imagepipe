@@ -51,7 +51,7 @@ _CAMERA_NAME_RE = re.compile(
     re.I,
 )
 _UUIDISH_RE = re.compile(r"^[0-9a-f]{8}(-?[0-9a-f]{4}){3}-?[0-9a-f]{12}$|^[0-9a-f\-_]{16,}$", re.I)
-_BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
+_BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f\uf780-\uf7ff\udc80-\udcff]')  # incl. bytes that weren't UTF-8
 
 
 # ---------------------------------------------------------------- dates

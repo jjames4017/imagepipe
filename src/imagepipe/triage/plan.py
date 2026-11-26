@@ -296,9 +296,22 @@ def plan_rows(cfg: Config, t: tdb.TriageDB, where: str = "", params: tuple = (),
             rows = t.db.execute(
                 f"SELECT * FROM files WHERE {base} AND source=? AND parent_id=? AND dir=? ORDER BY rel_path",
                 (*params, g["source"], g["parent_id"], g["dir"])).fetchall()
-            for k, v in planner.plan_group(rows, folder_of[g["source"]], progress).items():
-                counts[k] = counts.get(k, 0) + v
-            t.db.commit()
+            try:
+                for k, v in planner.plan_group(rows, folder_of[g["source"]], progress).items():
+                    counts[k] = counts.get(k, 0) + v
+                t.db.commit()
+            except Exception as exc:
+                # a folder that can't be planned is marked and skipped; the rest carry on
+                t.db.rollback()
+                log.exception("could not plan folder %s", g["dir"])
+                say(f"Problem planning folder '{g['dir']}': {exc} - its files are marked 'error', the rest carry on")
+                for r in rows:
+                    t.update(r["id"], status=tdb.ERROR)
+                    t.action(None, r, "error", r["current_path"], None, None, detail=f"plan: {exc}"[:500])
+                t.db.commit()
+                counts["error"] = counts.get("error", 0) + len(rows)
+                if progress is not None:
+                    progress.update(len(rows))
 
     if quiet:
         work(None)
