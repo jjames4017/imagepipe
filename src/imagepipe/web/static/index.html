@@ -170,7 +170,8 @@
   <!-- REPORTS -->
   <section class="tab" id="tab-reports">
     <div class="card">
-      <div class="row"><h2>Reports and logs</h2><button class="b" id="r-refresh">Refresh</button></div>
+      <div class="row"><h2>Reports and logs</h2><button class="b" id="r-refresh">Refresh</button>
+        <button class="b" id="r-delete-all">Delete all logs</button><span class="msg" id="r-msg"></span></div>
       <div class="scroll" style="max-height:300px"><table><thead><tr><th>File</th><th>Folder</th><th>Size</th><th>Changed</th><th></th></tr></thead>
         <tbody id="r-rows"></tbody></table></div>
     </div>
@@ -337,14 +338,29 @@ async function loadReports() {
   const files = await api("/api/reports");
   $("#r-rows").innerHTML = files.map(f => `<tr><td class="path"><a href="#" data-view="${esc(f.path)}">${esc(f.name)}</a></td>
     <td class="path muted">${esc(f.root)}</td><td>${fmtBytes(f.size)}</td><td>${new Date(f.mtime * 1000).toLocaleString()}</td>
-    <td><a href="/api/file?download=1&path=${encodeURIComponent(f.path)}">download</a></td></tr>`).join("")
+    <td><a href="/api/file?download=1&path=${encodeURIComponent(f.path)}">download</a>
+      ${f.protected ? `<span class="muted" title="Audit trail - kept">kept</span>`
+                    : `<button class="b" data-del="${esc(f.path)}">Delete</button>`}</td></tr>`).join("")
     || `<tr><td colspan="5" class="muted">No reports yet.</td></tr>`;
+  $$("[data-del]").forEach(b => b.onclick = () => deleteReports({paths: [b.dataset.del]},
+    "Delete " + b.dataset.del + "?"));
   $$("[data-view]").forEach(a => a.onclick = async e => { e.preventDefault();
     const p = a.dataset.view; $("#r-title").textContent = p;
     const r = await fetch("/api/file?path=" + encodeURIComponent(p)); const t = await r.text();
     $("#r-view").textContent = t.length > 2_000_000 ? t.slice(0, 2_000_000) + "\n\n... (truncated - use download)" : t; });
 }
 $("#r-refresh").onclick = loadReports;
+async function deleteReports(body, question) {
+  if (!confirm(question)) return;
+  try {
+    const r = await api("/api/reports/delete", body);
+    showMsg($("#r-msg"), `Deleted ${r.deleted} file(s), ${fmtBytes(r.freed)} freed` +
+      (r.skipped.length ? ` - ${r.skipped.length} kept (${r.skipped.map(x => x.why).join(", ")})` : ""), true);
+  } catch (e) { showMsg($("#r-msg"), e.message, false); }
+  loadReports();
+}
+$("#r-delete-all").onclick = () => deleteReports({all: true},
+  "Delete ALL logs and reports listed here? The triage database and actions.csv (audit trail) are kept.");
 
 // ---------- settings
 let SCHEMA = null, CFG = null, mode = "form";
