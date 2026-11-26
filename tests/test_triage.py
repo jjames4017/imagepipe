@@ -617,3 +617,38 @@ def test_web_scan_reread_argv():
         "triage", "scan", "--source", "photos", "--reread-problems"]
     assert build_argv("triage-scan", {"reread": "all"}) == ["triage", "scan", "--reread-all"]
     assert build_argv("triage-scan", {"reread": "junk"}) == ["triage", "scan"]
+
+
+# ------------------------------------------------- #16 routing decisions
+def _row(**kw):
+    base = dict(kind="document", ext="", mime="", catalogue_error=None, ext_mismatch=0, encrypted=0,
+                takeout_title=None)
+    return base | kw
+
+
+def test_routing_decisions():
+    from imagepipe.triage.kinds import classify
+
+    zipped = dict(kind="archive", mime="application/zip")
+    for ext in ("zip", "7z", "rar", "tar", "gz", "cab"):
+        assert classify(_row(**zipped, ext=ext), {})[0] == "extract", ext
+    for ext in ("xlsm", "dotx", "potx", "xltx", "xlsb", "vsdx", "vstx", "vssx", "odg", "oxps", "xps", "idml",
+                "onepkg", "zed", "uzed", "ftmb", "doc", "xls", "webarchive", ""):
+        assert classify(_row(**zipped, ext=ext), {}) == ("quarantine/unknown-type", "unrecognised-extension"), ext
+    assert classify(_row(**zipped, ext="kmz"), {})[0] == "sorted/other-known"  # known zip-based types unchanged
+    ole = dict(mime="application/x-ole-storage")
+    for ext in ("ftw", "gno", "fbk", "mpp", "vsd", "pub", "tcw", "hmk", "cl3", "obd"):
+        assert classify(_row(**ole, ext=ext), {})[0] == "sorted/other-known", ext
+    for ext in ("tmp", "crdownload", "asd", "wbk"):
+        assert classify(_row(**ole, ext=ext), {}) == ("quarantine/system-junk", f"temp-or-backup-{ext}"), ext
+    assert classify(_row(**zipped, ext="crdownload"), {})[0] == "quarantine/system-junk"
+    for ext in ("tibuq6", "no1doc", "xls whakapapa", ""):
+        assert classify(_row(**ole, ext=ext), {}) == ("quarantine/unknown-type", "unrecognised-extension"), ext
+    assert classify(_row(**ole, ext="doc"), {}) == ("docupipe", "document-doc")
+
+
+def test_odd_extension_not_used_in_new_name():
+    from imagepipe.triage.naming import build_name
+
+    assert build_name("IPX", "2001", "Tree", "xls whakapapa") == "IPX_2001_Tree-xls-whakapapa"
+    assert build_name("IPX", "2001", "Tree", "doc") == "IPX_2001_Tree.doc"

@@ -199,7 +199,14 @@ def smartname(place: str | None, title: str | None, folders: list[str], stem: st
     return name, "+".join(src for _t, src in pieces)
 
 
+_GOOD_EXT_RE = re.compile(r"^[a-z0-9_]{1,15}$")
+
+
 def build_name(pid: str, date: str, smart: str, ext: str) -> str:
+    if ext and not _GOOD_EXT_RE.match(ext):
+        # an odd "extension" (spaces, symbols, e.g. "xls whakapapa") is part of the name, not an extension
+        smart = "-".join(p for p in (smart, clean_part(ext)) if p)
+        ext = ""
     name = f"{pid}_{date}_{smart}"
     suffix = f".{ext}" if ext else ""
     # keep the whole name well inside the 255-byte limit of most file systems
