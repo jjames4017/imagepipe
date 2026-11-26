@@ -9,7 +9,7 @@ one place:
 |---|---|
 | `imagepipe/` | Photos and RAW files, with their sidecars (XMP, AAE, Google Takeout JSON) and Live Photo clips. Exact duplicates all go - ImagePipe dedupes them |
 | `docupipe/` | Documents and PDFs, staged for review before Paperless. Duplicates all go |
-| `sorted/<type>/` | `video`, `audio`, `software`, `disk-images`, `email`, `ebooks`, `code`, `fonts`, `other-known`, `web-pages`. Duplicates all go |
+| `sorted/<type>/` | `video`, `audio`, `software`, `disk-images`, `email`, `ebooks`, `code`, `fonts`, `other-known`, `web-pages`, `specials`. Duplicates all go |
 | `quarantine/<reason>/` | `unknown-type`, `corrupt`, `encrypted`, `archive-failed`, `zero-byte`, `system-junk` |
 
 Archives are extracted, every file inside is checked, the contents are sorted
@@ -295,6 +295,7 @@ The bucket for each file, in order:
 | XMP/AAE/THM sidecar, Takeout JSON | with its photo; `imagepipe` if its photo isn't found |
 | short video beside a same-named photo (Live Photo) | with its photo |
 | PDF | `docupipe` |
+| design / vector files (`.psd .psb .xcf .kra .afdesign .afphoto .indd .svg .svgz .eps .ai .cdr .wmf .emf .ps .dxf .dwg`), `.mpo`, `.ico`, and TIFFs that are multi-page, layered or unreadable | `sorted/specials` (reviewed one by one) |
 | saved web page and its `_files` folder, `.mht` | `sorted/web-pages` |
 | Word, Excel, PowerPoint, OpenDocument, Pages/Numbers/Keynote, RTF, text, Markdown, CSV, HTML (by extension) | `docupipe` |
 | document content under an extension triage doesn't know (e.g. `.tibuq6`) | `quarantine/unknown-type` |

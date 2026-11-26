@@ -543,7 +543,7 @@ def test_psd_and_protected_office_are_not_problems(env):
 
     assert run_plan(cfg)["status"] == "finished"
     r = rows(cfg)
-    assert r["file-cabinet:art/war.PSD"]["bucket"] == "imagepipe"
+    assert r["file-cabinet:art/war.PSD"]["bucket"] == "sorted/specials"  # design files kept aside (#55)
     assert r["file-cabinet:fin/Banking Details.docx"]["bucket"] == "quarantine/encrypted"
     assert r["file-cabinet:fin/old format.xlsx"]["bucket"] == "docupipe"
 
@@ -1090,3 +1090,39 @@ def test_plan_keeps_old_year_on_a_scanned_photo(env):
     assert run_plan(cfg)["status"] == "finished"
     r = rows(cfg)["file-cabinet:Friends/Thelma Reynolds 1984.jpg"]
     assert r["name_date"] == "2015-09-16_164939" and r["smartname"].endswith("Thelma-Reynolds-1984")
+
+
+# ------------------------------------------------- 0.3.15: #55 specials
+def test_specials_routing():
+    from imagepipe.triage.kinds import classify
+
+    for ext in ("psd", "psb", "svg", "eps", "ai", "cdr", "wmf", "emf", "ps", "dxf", "dwg", "xcf", "kra",
+                "afdesign", "afphoto", "indd", "mpo", "ico"):
+        for kind in ("image", "unknown", "document"):
+            assert classify(_row(kind=kind, ext=ext, rel_path=f"x/a.{ext}"), {}) == (
+                "sorted/specials", f"special-{ext}"), (ext, kind)
+    assert classify(_row(kind="empty", ext="psd", rel_path="x/a.psd"), {})[0] == "quarantine/zero-byte"
+    for ext in ("heic", "gif", "webp", "png", "jpg"):
+        assert classify(_row(kind="image", ext=ext, rel_path=f"x/a.{ext}"), {})[0] == "imagepipe", ext
+
+
+def test_plan_sends_odd_tiffs_to_specials(env):
+    np = pytest.importorskip("numpy")
+    tifffile = pytest.importorskip("tifffile")
+    cfg, vault = env
+    folder = vault / "file cabinet" / "scans"
+    folder.mkdir(parents=True)
+    img = np.full((20, 30, 3), 90, dtype=np.uint8)
+    with tifffile.TiffWriter(folder / "two.tif") as tw:
+        tw.write(img, photometric="rgb")
+        tw.write(img[:5, :5], photometric="rgb")
+    tifffile.imwrite(folder / "layers.tif", img, photometric="rgb", extratags=[(37724, "B", 4, b"Adob", False)])
+    Image.new("RGB", (30, 20)).save(folder / "plain.tif")
+    assert run_scan(cfg, cfg.triage.source("file-cabinet"))["status"] == "finished"
+    assert run_plan(cfg)["status"] == "finished"
+    r = rows(cfg)
+    assert (r["file-cabinet:scans/two.tif"]["bucket"], r["file-cabinet:scans/two.tif"]["rule"]) == (
+        "sorted/specials", "special-tiff-pages")
+    assert r["file-cabinet:scans/layers.tif"]["rule"] == "special-tiff-layered"
+    assert r["file-cabinet:scans/plain.tif"]["bucket"] == "imagepipe"
+    assert r["file-cabinet:scans/two.tif"]["dest_path"].startswith(str(vault / "sorted" / "specials" / "file cabinet"))

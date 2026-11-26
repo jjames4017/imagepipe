@@ -25,6 +25,25 @@ The report goes to `<reports_dir>/layered/layered-<time>/`:
 
 Identical copies sit next to each other in the CSV (sorted by SHA-256).
 
+## Moving the list aside: `imagepipe layered move`
+
+```bash
+imagepipe layered move --csv <layered.csv> --dry-run    # see what would move
+imagepipe layered move --csv <layered.csv>              # move
+```
+
+Moves every file in a `layered find` CSV from the triage `imagepipe`
+destination (`--root`) to `sorted/specials` (`--to`), keeping its folders.
+Same safe move as triage: an instant hard link plus a same-file check on one
+file system (a copy with a SHA-256 check across file systems), never
+overwriting. A file no longer at its path is skipped. Every file is listed in
+`<reports_dir>/layered/move-<time>/moves.csv`, the triage record follows the
+file (bucket `sorted/specials`, rule `special-review`, a `moved` action), and
+folders left empty are removed.
+
+From 0.3.15 triage sends these files to `sorted/specials` itself: design and
+vector types, `.mpo`, `.ico`, and multi-page, layered or unreadable TIFFs.
+
 ## Working copies: `imagepipe layered render`
 
 ```bash

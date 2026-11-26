@@ -254,6 +254,35 @@ def cmd_layered_render(cfg, args) -> int:
     return 1 if failed else 0
 
 
+def cmd_layered_move(cfg, args) -> int:
+    from imagepipe import layered
+
+    tc = getattr(cfg, "triage", None)
+    root = Path(args.root) if args.root else (tc.destinations["imagepipe"] if tc else None)
+    to = Path(args.to) if args.to else (tc.destinations["sorted"] / "specials" if tc else None)
+    if root is None or to is None:
+        print("Give --root and --to (no triage destinations configured).", file=sys.stderr)
+        return 2
+    csv_path = Path(args.csv)
+    if not csv_path.is_file():
+        print(f"No such file: {csv_path}", file=sys.stderr)
+        return 2
+    t = None
+    if tc is not None and not args.dry_run and Path(tc.database).is_file():
+        from imagepipe.triage import db as tdb
+
+        t = tdb.TriageDB(tc.database, cfg.tz, tc.reports_dir / "actions.csv")
+    print(f"{'Dry run - nothing moves. ' if args.dry_run else ''}From {root}\n  to {to}", file=sys.stderr)
+    try:
+        res = layered.move_listed(csv_path, root, to, cfg.reports_dir / "layered", cfg.tz, args.dry_run, t)
+    finally:
+        if t is not None:
+            t.close()
+    print(", ".join(f"{v:,} {k}" for k, v in res.items() if k != "folder") or "nothing to do")
+    print(f"Every file is listed in {res['folder']}/moves.csv")
+    return 1 if res.get("error") else 0
+
+
 def cmd_serve(args) -> int:
     import os
 
@@ -328,6 +357,12 @@ def build_parser() -> argparse.ArgumentParser:
     lr.add_argument("files", nargs="+")
     lr.add_argument("--out", help="folder for the working copies (default: <reports_dir>/layered/renders)")
     lr.set_defaults(func=cmd_layered_render)
+    lm = lsub.add_parser("move", help="move every file in a 'layered find' CSV aside, keeping its folders")
+    lm.add_argument("--csv", required=True, help="the layered.csv from 'imagepipe layered find'")
+    lm.add_argument("--to", help="where to (default: <triage sorted>/specials)")
+    lm.add_argument("--root", help="the folder the paths are under (default: the triage imagepipe destination)")
+    lm.add_argument("--dry-run", action="store_true", help="list what would move; move nothing")
+    lm.set_defaults(func=cmd_layered_move)
     return p
 
 
