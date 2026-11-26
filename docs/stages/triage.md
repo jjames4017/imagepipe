@@ -127,6 +127,20 @@ A password-protected archive goes to `quarantine/encrypted`; one that can't be
 read, fails a check, is empty, unpacks to more than `max_extract_bytes` or is
 nested too deep goes to `quarantine/archive-failed` - untouched.
 
+## Special file types
+
+- **Password-protected Office files** (`.docx`, `.xlsx`, `.pptx` ...) are not
+  zip files inside: they are OLE compound files holding an `EncryptedPackage`
+  stream. Triage recognises them, marks them encrypted (rule
+  `encrypted-document`) and sends them to `quarantine/encrypted`, untouched.
+  An old binary Office file renamed to `.docx`/`.xlsx`, or an RTF/HTML file
+  saved under an Office extension, is a normal document and goes to
+  `docupipe`. An Office file that looks like a zip but is damaged is still
+  reported as a problem.
+- **Photoshop files** (`.psd`, `.psb`): Pillow can't open most of them, so the
+  width and height come from the Photoshop header and the date and title from
+  exiftool (when installed). They go to `imagepipe` like other images.
+
 Before extracting, triage checks there is room in `work_dir`; if not, apply
 stops with a message rather than filling the disk.
 

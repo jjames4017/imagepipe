@@ -27,7 +27,10 @@ from imagepipe.fspath import to_fs
 from imagepipe.metadata import HEIF
 from imagepipe.progress import Progress, fmt_bytes
 from imagepipe.triage import db as tdb
-from imagepipe.triage.meta import exiftool_meta, image_meta, office_meta, takeout_meta, xmp_sidecar_meta
+from imagepipe.triage.meta import (exiftool_meta, image_meta, office_meta, ole_office_meta, psd_meta, takeout_meta,
+                                   xmp_sidecar_meta)
+
+PSD_MIME = "image/vnd.adobe.photoshop"
 
 log = logging.getLogger("imagepipe")
 CHUNK = 1 << 20
@@ -91,12 +94,22 @@ def read_entry(item: tuple) -> dict:
     ext = out["ext"] or ""
     try:
         meta: dict = {}
-        if kind == "image" and (mime != "image/heic" or HEIF):
+        if mime == PSD_MIME:
+            # Pillow can't open most Photoshop files: size from the header, the rest from exiftool
+            meta = psd_meta(abs_path)
+            if _W.get("use_exiftool"):
+                meta = {**meta, **{k: v for k, v in exiftool_meta(_et(), abs_path, kind).items()
+                                   if k not in ("width", "height")}}
+        elif kind == "image" and (mime != "image/heic" or HEIF):
             meta = image_meta(abs_path)
         elif kind in ("raw", "video", "audio", "pdf", "image") and _W.get("use_exiftool"):
             meta = exiftool_meta(_et(), abs_path, kind)
         elif kind == "document" and ext in OFFICE_ZIP_EXT and ext != "epub":
-            meta = office_meta(abs_path)
+            if mime == "application/x-ole-storage":
+                meta = ole_office_meta(abs_path)  # password protected, or an old-format file renamed
+            elif mime == "application/vnd.openxmlformats":
+                meta = office_meta(abs_path)
+            # RTF/HTML/text saved under an Office extension: a readable document, nothing more to read
         elif kind == "document" and ext == "json":
             meta = takeout_meta(abs_path, size)
         elif kind == "sidecar" and ext in ("xmp", "xmp_original"):
@@ -157,15 +170,19 @@ def _write_row(t: tdb.TriageDB, r: dict, info: dict, run_id: int) -> None:
 
 
 def read_items(t: tdb.TriageDB, pool, items: list[tuple], meta_of: dict, run_id: int, progress: Progress,
-               batch_size: int = 500) -> int:
-    """Read files with the pool and write their rows. Returns the error count."""
+               batch_size: int = 500, errors_before: int = 0) -> int:
+    """Read files with the pool and write their rows. Returns the error count for these items.
+
+    errors_before is the count from earlier pages, so the progress line shows the
+    running total for the whole scan rather than starting again at 0 each page.
+    """
     errors = 0
     pending: list[dict] = []
     for r in pool.imap_unordered(read_entry, items, chunksize=8):
         if r["catalogue_error"]:
             errors += 1
         pending.append(r)
-        progress.update(1, r["size"], extra=f"{errors:,} problems")
+        progress.update(1, r["size"], extra=f"{errors_before + errors:,} problems")
         if len(pending) >= batch_size:
             errors += _write_rows(t, pending, meta_of, run_id)
             pending.clear()
@@ -270,7 +287,7 @@ def run_scan(cfg: Config, source: Source) -> dict:
                             "current_path": abs_path,
                         }
                         items.append((rel, to_fs(abs_path), os.path.basename(rel), r["size"], r["mtime"]))
-                    errors += read_items(t, pool, items, meta_of, run_id, p)
+                    errors += read_items(t, pool, items, meta_of, run_id, p, errors_before=errors)
                 pool.close()
             except KeyboardInterrupt:
                 interrupted = True
