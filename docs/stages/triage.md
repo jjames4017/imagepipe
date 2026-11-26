@@ -94,7 +94,9 @@ Two exceptions:
   no date is found in a sidecar, the file name or the folders. When it is used
   anyway, its source shows as e.g. `exif-default-clock`. A camera model that
   has shown a default date is distrusted for the rest of that year too (its
-  clock started at the default and ran on from there).
+  clock started at the default and ran on from there) - but its EXIF date is
+  only replaced by a sidecar, file-name or folder date more than a year away
+  from it, so a correctly set camera of the same model keeps its dates.
 - **Ebooks**: a year on its own in an ebook's file name is part of the title
   (`Red Inferno_ 1945`), not its date, and stays in the smartname.
 
@@ -109,7 +111,9 @@ URL-encoded names (`Cliff%20Edwards`) are decoded before dates and smartnames
 are worked out; the folders on disk are not changed. Generic titles
 (`Track 23`, `Chapter 4`, `Untitled`) are never used as smartnames. Month
 names joined to other letters count (`WTBDMay2009` -> `2009-05`). UUIDs and
-runs of 16+ hex characters are left out of smartnames.
+runs of 16+ hex characters are left out of smartnames, and a run of words
+repeated straight after itself appears once (`Dansey-Dansey-Census` ->
+`Dansey-Census`).
 
 Files going to `quarantine/...` always end with their original file name, so
 they can be recognised when reviewing (`..._Harddrive-WTB-Dansey-B8883000`).
@@ -224,7 +228,8 @@ nested too deep goes to `quarantine/archive-failed` - untouched.
   named e.g. `my_files` is not caught. An `.htm` with no `_files` folder is a
   normal document.
 - **Application and genealogy files** (`.ftw`, `.gno`, `.fbk`, `.mpp`, `.vsd`,
-  `.pub`, `.tcw`, `.hmk`, `.cl3`, `.obd`) go to `sorted/other-known`.
+  `.pub`, `.tcw`, `.hmk`, `.cl3`, `.obd`, `.paf`, `.ged`) go to
+  `sorted/other-known`.
 - **Temporary, partial-download and automatic backup files** (`.tmp`,
   `.crdownload`, `.asd`, `.wbk`) go to `quarantine/system-junk`.
 - **Photoshop files** (`.psd`, `.psb`): Pillow can't open most of them, so the
@@ -273,7 +278,7 @@ The bucket for each file, in order:
 | Rule | Bucket |
 |---|---|
 | empty file | `quarantine/zero-byte` |
-| `.DS_Store`, `Thumbs.db`, `desktop.ini`, `._*` and similar | `quarantine/system-junk` |
+| `.DS_Store`, `Thumbs.db`, `photothumb.db`, `desktop.ini`, `._*` and similar | `quarantine/system-junk` |
 | can't be read | `quarantine/corrupt` |
 | extension listed in `bucket_overrides` | as configured |
 | `.tmp`, `.crdownload`, `.asd`, `.wbk`, and Office lock files (`~$...`) | `quarantine/system-junk` |

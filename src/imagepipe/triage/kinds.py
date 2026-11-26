@@ -8,6 +8,8 @@ The rule is a short name for why, recorded against every file.
 
 from __future__ import annotations
 
+from imagepipe.detect import JUNK_NAMES
+
 ARCHIVE_SUFFIXES = (".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tbz2", ".txz", ".zip", ".rar", ".7z",
                     ".tar", ".gz", ".bz2", ".xz", ".cab")
 
@@ -45,7 +47,7 @@ for _bucket, _exts in {
                            "srt", "sub", "vtt", "ass", "cue", "m3u", "m3u8", "pls", "reg", "pem", "crt", "key",
                            # application and genealogy files (Family Tree Maker, GenoPro, Project, Visio,
                            # Publisher ...): kept, but not documents for Paperless
-                           "ftw", "gno", "fbk", "mpp", "vsd", "pub", "tcw", "hmk", "cl3", "obd"},
+                           "ftw", "gno", "fbk", "mpp", "vsd", "pub", "tcw", "hmk", "cl3", "obd", "paf", "ged"},
 }.items():
     for _e in _exts:
         EXT_BUCKET.setdefault(_e, _bucket)
@@ -87,6 +89,8 @@ def classify(row, overrides: dict[str, str]) -> tuple[str, str]:
         name = ""
     if name.startswith("~$"):  # Office owner/lock file beside an open document (#31)
         return "quarantine/system-junk", "office-lock-file"
+    if name.lower() in JUNK_NAMES:  # by name, so a name added later applies without a re-scan (#42)
+        return "quarantine/system-junk", "system-junk-file"
     if kind == "junk":
         return "quarantine/system-junk", "system-junk-file"
     if err.startswith("read:"):

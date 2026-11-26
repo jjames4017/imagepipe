@@ -976,3 +976,42 @@ def test_plan_drifting_clock_ebook_years_quarantine_names(env):
     assert book["name_date"] != "1945" and "1945" in book["smartname"]
     q = r["file-cabinet:WTB 2008-2009/B8883000"]
     assert q["bucket"] == "quarantine/unknown-type" and q["smartname"].endswith("B8883000")
+
+
+# ------------------------------------------------- 0.3.10: #41-#43
+def test_drift_only_replaced_by_a_date_far_away(env):
+    cfg, vault = env
+    build(vault / "file cabinet", {
+        "NYE/2008 New Year/party.jpg": cam_jpeg("DSC-W55", "2008:01:01 00:15:00"),  # a real New Year photo
+        "Trips/Fiji 2008/beach.jpg": cam_jpeg("DSC-W55", "2008:07:14 10:20:30"),
+        "Pics/Camera Pics 19-03-2014/100_2422.jpg": cam_jpeg("DSC-W55", "2008:02:25 15:44:58"),
+    })
+    assert run_scan(cfg, cfg.triage.source("file-cabinet"))["status"] == "finished"
+    assert run_plan(cfg)["status"] == "finished"
+    r = rows(cfg)
+    fiji = r["file-cabinet:Trips/Fiji 2008/beach.jpg"]  # folder year agrees: the EXIF date is trusted
+    assert (fiji["name_date"], fiji["date_source"]) == ("2008-07-14_102030", "exif")
+    far = r["file-cabinet:Pics/Camera Pics 19-03-2014/100_2422.jpg"]  # folder years away: EXIF replaced
+    assert (far["name_date"], far["date_source"]) == ("2014-03-19", "folder")
+
+
+def test_genealogy_and_thumbnail_cache_routing():
+    from imagepipe.triage.kinds import classify
+
+    for ext in ("paf", "ged"):
+        assert classify(_row(kind="unknown", ext=ext, rel_path=f"x/tree.{ext}"), {})[0] == "sorted/other-known"
+        assert classify(_row(mime="text/plain", ext=ext, rel_path=f"x/tree.{ext}"), {})[0] == "sorted/other-known"
+    db = _row(kind="unknown", ext="db", rel_path="Pics/Funeral/photothumb.db")
+    assert classify(db, {}) == ("quarantine/system-junk", "system-junk-file")
+    assert classify(_row(kind="unknown", ext="db", rel_path="x/family.db"), {})[0] == "sorted/other-known"
+
+
+def test_repeated_words_dropped():
+    from imagepipe.triage.naming import drop_repeats, smartname
+
+    assert drop_repeats("Photos-Dallas-Tito-Dallas-2-Dallas-2-003") == "Photos-Dallas-Tito-Dallas-2-003"
+    assert drop_repeats("Dansey-Dansey-Census") == "Dansey-Census"
+    assert drop_repeats("dansey-Dansey") == "dansey"
+    assert drop_repeats("Flat-1-1") == "Flat-1-1"
+    name, _ = smartname(None, None, ["Dansey", "Dansey"], "Some Dansey Birth dates")
+    assert name == "Dansey-Some-Dansey-Birth-dates"
