@@ -1,0 +1,1 @@
+"""ImagePipe web UI."""

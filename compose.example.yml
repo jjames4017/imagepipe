@@ -1,16 +1,21 @@
 # Example compose file for ImagePipe.
 # Copy it to compose.yml and change every line marked CHANGE ME.
 #
-# Run a catalogue in the foreground so the live progress shows on screen:
+# Start the web UI:  docker compose up -d   then open http://<host>:8020/
+# Or run a command in the foreground so the live progress shows on screen:
 #   docker compose run --rm imagepipe catalogue --source photos
 
 services:
   imagepipe:
     build: .                                  # or: image: ghcr.io/<owner>/imagepipe:latest
     container_name: imagepipe
+    command: ["serve"]                        # the web UI on port 8020; jobs are started from the page
+    restart: unless-stopped
+    ports:
+      - "8020:8020"
     environment:
       TZ: Australia/Brisbane
     volumes:
-      - ./config:/config:ro                   # holds imagepipe.yml
+      - ./config:/config                      # holds imagepipe.yml (read-write so the web UI can save settings)
       - /srv/imagepipe/data:/data             # CHANGE ME: manifest, logs, reports
       - /srv/photos:/sources/photos:ro        # CHANGE ME: a source folder, always read-only

@@ -9,6 +9,7 @@ query is running. Output goes to stderr, never to a pipe that is thrown away.
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import threading
 import time
@@ -43,6 +44,12 @@ class Progress:
         self.unit = unit
         self.stream = stream or sys.stderr
         self.tty = hasattr(self.stream, "isatty") and self.stream.isatty()
+        if interval is None:
+            env = os.environ.get("IMAGEPIPE_PROGRESS_INTERVAL")
+            try:
+                interval = float(env) if env else None
+            except ValueError:
+                interval = None
         self.interval = interval if interval is not None else (1.0 if self.tty else 15.0)
         self.count = 0
         self.bytes = 0

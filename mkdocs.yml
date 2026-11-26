@@ -29,6 +29,7 @@ nav:
   - Stages:
       - Catalogue: stages/catalogue.md
       - Triage: stages/triage.md
+  - Web UI: web-ui.md
   - Notifications: notifications.md
   - Development: development.md
   - Roadmap: roadmap.md

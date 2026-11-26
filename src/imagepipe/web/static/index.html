@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ImagePipe</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --muted:#677085; --line:#dde1e8; --accent:#2f5bd3;
+          --warn:#b4471a; --ok:#227a4b; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171d; --card:#1c2028; --ink:#e4e7ee; --muted:#9aa3b5; --line:#2e3440; --accent:#7d9cf0;
+            --warn:#f08a5d; --ok:#5fc48c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; gap:24px; padding:12px 20px; background:var(--card); border-bottom:1px solid var(--line);
+           position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; letter-spacing:.2px; }
+  header .ver { color:var(--muted); font-size:12px; margin-left:6px; font-weight:400; }
+  nav { display:flex; gap:4px; flex-wrap:wrap; }
+  nav button { background:none; border:0; padding:7px 12px; border-radius:6px; color:var(--muted); font:inherit; cursor:pointer; }
+  nav button.on { background:var(--bg); color:var(--ink); font-weight:600; }
+  #jobchip { margin-left:auto; font-size:12px; color:var(--muted); }
+  #jobchip.running { color:var(--accent); font-weight:600; }
+  main { padding:20px; max-width:1300px; margin:0 auto; }
+  section.tab { display:none; } section.tab.on { display:block; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:16px; }
+  .card h2 { font-size:15px; margin:0 0 4px; } .card p.sub { margin:0 0 12px; color:var(--muted); font-size:13px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:16px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+  button.b { font:inherit; padding:7px 13px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; }
+  button.b:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.danger { border-color:var(--warn); color:var(--warn); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  input[type=text], input[type=number], select, textarea { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px;
+           background:var(--bg); color:var(--ink); }
+  input[type=text] { min-width:260px; } textarea { width:100%; }
+  label.inline { display:inline-flex; gap:6px; align-items:center; margin-right:12px; }
+  pre { font: 12.5px/1.45 var(--mono); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px;
+        overflow:auto; white-space:pre-wrap; word-break:break-word; margin:0; }
+  #log { max-height:420px; } #progress { margin-bottom:8px; min-height:1.5em; color:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; position:sticky; top:0; background:var(--card); }
+  td.path { font-family:var(--mono); font-size:12px; word-break:break-all; }
+  .muted { color:var(--muted); } .warn { color:var(--warn); } .ok { color:var(--ok); }
+  .pill { display:inline-block; padding:1px 8px; border-radius:20px; background:var(--bg); border:1px solid var(--line); font-size:12px; }
+  .field { display:grid; grid-template-columns: 240px 1fr; gap:10px; padding:8px 0; border-bottom:1px dashed var(--line); align-items:start; }
+  .field .help { color:var(--muted); font-size:12px; margin-top:3px; }
+  .field input[type=text] { width:100%; }
+  .rec { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-bottom:8px; }
+  .rec .field { grid-template-columns: 180px 1fr; border-bottom:0; padding:4px 0; }
+  .msg { padding:8px 12px; border-radius:6px; margin:8px 0; display:none; }
+  .msg.on { display:block; } .msg.err { background:rgba(180,71,26,.12); color:var(--warn); } .msg.good { background:rgba(34,122,75,.12); color:var(--ok); }
+  .scroll { max-height:560px; overflow:auto; border:1px solid var(--line); border-radius:8px; }
+  .pager { display:flex; gap:8px; align-items:center; margin-top:8px; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>ImagePipe<span class="ver" id="ver"></span></h1>
+  <nav id="nav">
+    <button data-tab="run" class="on">Run</button>
+    <button data-tab="status">Status</button>
+    <button data-tab="plan">Plan review</button>
+    <button data-tab="actions">Actions</button>
+    <button data-tab="reports">Reports</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
+  <span id="jobchip">idle</span>
+</header>
+<main>
+  <div class="msg err" id="cfgerr"></div>
+
+  <!-- RUN -->
+  <section class="tab on" id="tab-run">
+    <div class="grid">
+      <div class="card">
+        <h2>Triage</h2>
+        <p class="sub">Sort the triage sources: scan (read-only), plan (dry run), then apply (moves files).</p>
+        <div class="row"><span class="muted">Source</span><select id="t-source"></select></div>
+        <div class="row">
+          <button class="b" data-job="triage-scan">Scan</button>
+          <button class="b" data-job="triage-plan">Plan (dry run)</button>
+          <button class="b" data-job="triage-export-csv">Export CSV</button>
+        </div>
+        <div class="row">
+          <button class="b danger" data-job="triage-apply">Apply - move files</button>
+          <span class="muted">limit</span><input type="number" id="t-limit" min="1" placeholder="all" style="width:110px">
+        </div>
+        <div class="row muted" id="planned"></div>
+      </div>
+      <div class="card">
+        <h2>Catalogue</h2>
+        <p class="sub">Read-only inventory of an ImagePipe source.</p>
+        <div class="row"><span class="muted">Source</span><select id="c-source"></select>
+          <label class="inline"><input type="checkbox" id="c-retry"> re-read files that failed</label></div>
+        <div class="row">
+          <button class="b" data-job="catalogue">Catalogue</button>
+          <button class="b" data-job="report">Rebuild reports</button>
+          <button class="b" data-job="export-csv">Export CSV</button>
+        </div>
+        <h2 style="margin-top:16px">Notifications</h2>
+        <div class="row"><button class="b" data-job="notify-test">Send test notification</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="jobtitle">No job running</h2>
+        <button class="b danger" id="stop" disabled>Stop</button>
+      </div>
+      <pre id="progress"></pre>
+      <pre id="log"></pre>
+    </div>
+    <div class="card">
+      <h2>Recent jobs</h2>
+      <table><thead><tr><th>Started</th><th>Job</th><th>Command</th><th>Result</th><th>Finished</th></tr></thead>
+        <tbody id="history"></tbody></table>
+    </div>
+  </section>
+
+  <!-- STATUS -->
+  <section class="tab" id="tab-status">
+    <div class="card"><div class="row"><h2>Status</h2><button class="b" id="status-refresh">Refresh</button></div>
+      <pre id="status-text" class="muted">Loading...</pre></div>
+  </section>
+
+  <!-- PLAN -->
+  <section class="tab" id="tab-plan">
+    <div class="card">
+      <h2>Plan review</h2>
+      <p class="sub">Every file the last plan placed, before apply. Nothing here has moved yet.</p>
+      <div class="row">
+        <select id="p-bucket"><option value="">all buckets</option></select>
+        <select id="p-rule"><option value="">all rules</option></select>
+        <input type="text" id="p-q" placeholder="search paths">
+        <button class="b" id="p-go">Filter</button>
+        <span class="muted" id="p-count"></span>
+      </div>
+      <div class="scroll"><table><thead><tr><th>From</th><th>To</th><th>Bucket / rule</th><th>Date</th><th>Smartname</th></tr></thead>
+        <tbody id="p-rows"></tbody></table></div>
+      <div class="pager"><button class="b" id="p-prev">Previous</button><button class="b" id="p-next">Next</button></div>
+    </div>
+  </section>
+
+  <!-- ACTIONS -->
+  <section class="tab" id="tab-actions">
+    <div class="card">
+      <h2>Actions</h2>
+      <p class="sub">Everything triage has done, newest first (also in actions.csv).</p>
+      <div class="row">
+        <select id="a-kind"><option value="">all actions</option></select>
+        <input type="text" id="a-q" placeholder="search paths, IDs, details">
+        <button class="b" id="a-go">Filter</button>
+        <span class="muted" id="a-count"></span>
+      </div>
+      <div class="scroll"><table><thead><tr><th>Time</th><th>Action</th><th>ID</th><th>From</th><th>To</th><th>Detail</th></tr></thead>
+        <tbody id="a-rows"></tbody></table></div>
+      <div class="pager"><button class="b" id="a-prev">Previous</button><button class="b" id="a-next">Next</button></div>
+    </div>
+  </section>
+
+  <!-- REPORTS -->
+  <section class="tab" id="tab-reports">
+    <div class="card">
+      <div class="row"><h2>Reports and logs</h2><button class="b" id="r-refresh">Refresh</button></div>
+      <div class="scroll" style="max-height:300px"><table><thead><tr><th>File</th><th>Folder</th><th>Size</th><th>Changed</th><th></th></tr></thead>
+        <tbody id="r-rows"></tbody></table></div>
+    </div>
+    <div class="card"><h2 id="r-title">Select a report</h2><pre id="r-view" style="max-height:600px"></pre></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="tab" id="tab-settings">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div><h2>Settings</h2><p class="sub" id="s-path"></p></div>
+        <div class="row">
+          <button class="b" id="s-mode-form">Form</button>
+          <button class="b" id="s-mode-raw">Raw YAML</button>
+          <button class="b primary" id="s-save">Check and save</button>
+        </div>
+      </div>
+      <div class="msg" id="s-msg"></div>
+      <p class="sub">Saving checks every value first and keeps the previous file as a dated .bak copy.
+        The form writes a clean file (comments are not kept); use Raw YAML to keep them.
+        Changes apply to the next job you run.</p>
+      <div id="s-form"></div>
+      <textarea id="s-raw" rows="40" style="display:none; font-family:var(--mono); font-size:12.5px"></textarea>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmtBytes = n => { const u = ["B","KB","MB","GB","TB"]; let i = 0; n = Number(n) || 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return (i ? n.toFixed(1) : n) + " " + u[i]; };
+async function api(path, body) {
+  const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({error: r.statusText}));
+  if (!r.ok && j.error) throw new Error(j.error);
+  return j;
+}
+function showMsg(el, text, good) { el.textContent = text; el.className = "msg on " + (good ? "good" : "err"); }
+
+// ---------- tabs
+$$("#nav button").forEach(b => b.onclick = () => {
+  $$("#nav button").forEach(x => x.classList.toggle("on", x === b));
+  $$("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + b.dataset.tab));
+  ({status: loadStatus, plan: () => loadPlan(0), actions: () => loadActions(0), reports: loadReports, settings: loadSettings})[b.dataset.tab]?.();
+});
+
+// ---------- meta
+let META = {};
+async function loadMeta() {
+  META = await api("/api/meta");
+  $("#ver").textContent = "v" + META.version;
+  const err = $("#cfgerr");
+  if (META.config_error) { err.textContent = "Config problem: " + META.config_error + " - fix it in Settings."; err.classList.add("on"); }
+  else err.classList.remove("on");
+  const fill = (sel, names, allLabel) => { const cur = sel.value;
+    sel.innerHTML = (allLabel ? `<option value="">${allLabel}</option>` : "") + names.map(n => `<option>${esc(n)}</option>`).join("");
+    if (names.includes(cur)) sel.value = cur; };
+  fill($("#t-source"), META.triage_sources, "all triage sources");
+  fill($("#c-source"), META.sources, null);
+  $("#planned").textContent = META.planned ? `Planned and waiting: ${META.planned.files.toLocaleString()} files (${fmtBytes(META.planned.bytes)})` : "";
+}
+
+// ---------- jobs
+let lineCount = 0, lastJobId = null;
+$$("[data-job]").forEach(b => b.onclick = async () => {
+  const kind = b.dataset.job, options = {};
+  if (kind.startsWith("triage-scan")) options.source = $("#t-source").value;
+  if (["catalogue", "report", "export-csv"].includes(kind)) options.source = $("#c-source").value;
+  if (kind === "catalogue") options.retry_errors = $("#c-retry").checked;
+  if (kind === "triage-apply") {
+    await loadMeta();
+    options.limit = $("#t-limit").value;
+    const n = META.planned ? META.planned.files : 0;
+    const what = options.limit ? `up to ${options.limit} of ${n.toLocaleString()} planned files` : `all ${n.toLocaleString()} planned files`;
+    if (!confirm(`Apply will MOVE ${what} out of the triage sources (and extract archives, deleting each one only after its contents are checked).\n\nHave you reviewed the plan? Continue?`)) return;
+  }
+  try { await api("/api/job/start", {kind, options}); lineCount = 0; $("#log").textContent = ""; poll(); }
+  catch (e) { alert(e.message); }
+});
+$("#stop").onclick = async () => { if (confirm("Stop the running job? It stops cleanly and keeps everything done so far.")) await api("/api/job/stop", {}); };
+
+async function poll() {
+  let s;
+  try { s = await api("/api/job?since=" + lineCount); } catch { return; }
+  const j = s.job, running = j && (j.status === "running" || j.status === "stopping");
+  $$("[data-job]").forEach(b => b.disabled = running);
+  $("#stop").disabled = !running;
+  const chip = $("#jobchip");
+  chip.textContent = running ? `running: ${j.label}` : "idle"; chip.className = running ? "running" : "";
+  if (j) {
+    if (j.id !== lastJobId) { lastJobId = j.id; lineCount = 0; $("#log").textContent = ""; return poll(); }
+    $("#jobtitle").innerHTML = `${esc(j.label)} <span class="pill">${esc(j.status)}</span> <span class="muted" style="font-weight:400;font-size:12px">imagepipe ${esc(j.argv.join(" "))}</span>`;
+    $("#progress").textContent = running ? j.progress.join("\n") : "";
+    if (j.lines.length) {
+      const log = $("#log"), atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+      log.textContent += (log.textContent ? "\n" : "") + j.lines.join("\n");
+      if (atEnd) log.scrollTop = log.scrollHeight;
+    }
+    lineCount = j.line_count;
+    if (!running && j.status !== "running") loadMeta();
+  }
+  $("#history").innerHTML = s.history.map(h => `<tr><td>${esc(h.started)}</td><td>${esc(h.label)}</td>
+    <td class="path">imagepipe ${esc(h.argv.join(" "))}</td>
+    <td class="${h.status === "finished" ? "ok" : "warn"}">${esc(h.status)}</td><td>${esc(h.finished)}</td></tr>`).join("")
+    || `<tr><td colspan="5" class="muted">None yet</td></tr>`;
+}
+setInterval(poll, 1000);
+
+// ---------- status
+async function loadStatus() { $("#status-text").textContent = "Loading..."; $("#status-text").textContent = (await api("/api/status")).text; }
+$("#status-refresh").onclick = loadStatus;
+
+// ---------- plan
+let pOff = 0; const PAGE = 200;
+async function loadPlan(off) {
+  pOff = Math.max(0, off);
+  const q = new URLSearchParams({bucket: $("#p-bucket").value, rule: $("#p-rule").value, q: $("#p-q").value, offset: pOff, limit: PAGE});
+  const r = await api("/api/plan?" + q);
+  const buckets = [...new Set(r.facets.map(f => f.bucket))];
+  const keepB = $("#p-bucket").value, keepR = $("#p-rule").value;
+  $("#p-bucket").innerHTML = `<option value="">all buckets</option>` + buckets.map(b => `<option>${esc(b)}</option>`).join("");
+  $("#p-bucket").value = keepB;
+  const rules = r.facets.filter(f => !keepB || f.bucket === keepB);
+  $("#p-rule").innerHTML = `<option value="">all rules</option>` + rules.map(f => `<option value="${esc(f.rule)}">${esc(f.rule)} (${f.n.toLocaleString()})</option>`).join("");
+  $("#p-rule").value = keepR;
+  $("#p-count").textContent = `${r.total.toLocaleString()} files` + (r.total ? ` - showing ${pOff + 1}-${Math.min(pOff + PAGE, r.total)}` : "");
+  $("#p-rows").innerHTML = r.rows.map(x => `<tr><td class="path">${esc(x.origin)}</td><td class="path">${esc(x.dest_path ?? "(extracted during apply)")}</td>
+    <td>${esc(x.bucket)}<div class="muted">${esc(x.rule)}${x.companion_of ? " - with " + esc(x.companion_of) : ""}</div></td>
+    <td>${esc(x.name_date)}<div class="muted">${esc(x.date_source)}</div></td>
+    <td>${esc(x.smartname)}<div class="muted">${esc(x.smartname_source)}</div></td></tr>`).join("")
+    || `<tr><td colspan="5" class="muted">Nothing planned. Run Triage: Scan, then Plan.</td></tr>`;
+  $("#p-prev").disabled = pOff === 0; $("#p-next").disabled = pOff + PAGE >= r.total;
+}
+$("#p-go").onclick = () => loadPlan(0);
+$("#p-bucket").onchange = () => { $("#p-rule").value = ""; loadPlan(0); };
+$("#p-rule").onchange = () => loadPlan(0);
+$("#p-q").onkeydown = e => { if (e.key === "Enter") loadPlan(0); };
+$("#p-prev").onclick = () => loadPlan(pOff - PAGE); $("#p-next").onclick = () => loadPlan(pOff + PAGE);
+
+// ---------- actions
+let aOff = 0;
+async function loadActions(off) {
+  aOff = Math.max(0, off);
+  const q = new URLSearchParams({action: $("#a-kind").value, q: $("#a-q").value, offset: aOff, limit: PAGE});
+  const r = await api("/api/actions?" + q);
+  const keep = $("#a-kind").value;
+  $("#a-kind").innerHTML = `<option value="">all actions</option>` + r.kinds.map(k => `<option>${esc(k)}</option>`).join("");
+  $("#a-kind").value = keep;
+  $("#a-count").textContent = `${r.total.toLocaleString()} actions`;
+  $("#a-rows").innerHTML = r.rows.map(x => `<tr><td>${esc(x.ts)}</td><td>${esc(x.action)}</td><td class="path">${esc(x.triage_id)}</td>
+    <td class="path">${esc(x.from_path)}</td><td class="path">${esc(x.to_path)}</td><td>${esc(x.detail)}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="muted">No actions yet.</td></tr>`;
+  $("#a-prev").disabled = aOff === 0; $("#a-next").disabled = aOff + PAGE >= r.total;
+}
+$("#a-go").onclick = () => loadActions(0); $("#a-kind").onchange = () => loadActions(0);
+$("#a-q").onkeydown = e => { if (e.key === "Enter") loadActions(0); };
+$("#a-prev").onclick = () => loadActions(aOff - PAGE); $("#a-next").onclick = () => loadActions(aOff + PAGE);
+
+// ---------- reports
+async function loadReports() {
+  const files = await api("/api/reports");
+  $("#r-rows").innerHTML = files.map(f => `<tr><td class="path"><a href="#" data-view="${esc(f.path)}">${esc(f.name)}</a></td>
+    <td class="path muted">${esc(f.root)}</td><td>${fmtBytes(f.size)}</td><td>${new Date(f.mtime * 1000).toLocaleString()}</td>
+    <td><a href="/api/file?download=1&path=${encodeURIComponent(f.path)}">download</a></td></tr>`).join("")
+    || `<tr><td colspan="5" class="muted">No reports yet.</td></tr>`;
+  $$("[data-view]").forEach(a => a.onclick = async e => { e.preventDefault();
+    const p = a.dataset.view; $("#r-title").textContent = p;
+    const r = await fetch("/api/file?path=" + encodeURIComponent(p)); const t = await r.text();
+    $("#r-view").textContent = t.length > 2_000_000 ? t.slice(0, 2_000_000) + "\n\n... (truncated - use download)" : t; });
+}
+$("#r-refresh").onclick = loadReports;
+
+// ---------- settings
+let SCHEMA = null, CFG = null, mode = "form";
+async function loadSettings() {
+  SCHEMA = SCHEMA || await api("/api/schema");
+  CFG = await api("/api/config");
+  $("#s-path").textContent = META.config_path + (META.config_writable ? "" : "  (read-only - mount the config folder read-write to save)");
+  $("#s-raw").value = CFG.raw;
+  renderForm(CFG.data);
+  setMode(mode);
+}
+function setMode(m) { mode = m; $("#s-form").style.display = m === "form" ? "" : "none"; $("#s-raw").style.display = m === "raw" ? "" : "none";
+  $("#s-mode-form").classList.toggle("primary", m === "form"); $("#s-mode-raw").classList.toggle("primary", m === "raw"); }
+$("#s-mode-form").onclick = () => { if (mode === "raw") { try { /* keep form in step with raw edits */ } catch {} } setMode("form"); };
+$("#s-mode-raw").onclick = () => setMode("raw");
+
+function inputFor(f, val, path) {
+  const id = "f-" + path.join("-");
+  const v = val === undefined ? f.default : val;
+  switch (f.type) {
+    case "bool": return `<input type="checkbox" id="${id}" data-path="${esc(path.join("."))}" data-type="bool" ${v ? "checked" : ""}>`;
+    case "int": return `<input type="number" id="${id}" data-path="${esc(path.join("."))}" data-type="int" value="${esc(v ?? "")}" style="width:140px">`;
+    case "choice": return `<select data-path="${esc(path.join("."))}" data-type="choice">${f.choices.map(c => `<option ${c === v ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`;
+    case "multi": return f.choices.map(c => `<label class="inline"><input type="checkbox" data-path="${esc(path.join("."))}" data-type="multi" value="${esc(c)}" ${(v || []).includes(c) ? "checked" : ""}> ${esc(c)}</label>`).join("");
+    case "list": return `<textarea rows="3" data-path="${esc(path.join("."))}" data-type="list" placeholder="one per line">${esc((v || []).join("\n"))}</textarea>`;
+    default: return `<input type="text" data-path="${esc(path.join("."))}" data-type="${f.type}" ${f.optional ? 'data-optional="1"' : ""} value="${esc(v ?? "")}">`;
+  }
+}
+function fieldRow(f, html) {
+  return `<div class="field"><div><b>${esc(f.label)}</b>${f.help ? `<div class="help">${esc(f.help)}</div>` : ""}</div><div>${html}</div></div>`;
+}
+function recordHtml(f, rec, path) {
+  return `<div class="rec" data-rec="${esc(path.join("."))}">${f.fields.map(sub => fieldRow(sub, inputFor(sub, rec[sub.key], [...path, sub.key]))).join("")}
+    <div class="row"><button class="b danger" type="button" data-remove>Remove</button></div></div>`;
+}
+function renderForm(data) {
+  const out = [];
+  for (const sec of SCHEMA) {
+    const base = sec.section ? (data[sec.section] || {}) : data;
+    const present = !sec.section || data[sec.section] !== undefined;
+    out.push(`<div class="card" data-section="${esc(sec.section || "")}"><h2>${esc(sec.label)}</h2>`);
+    if (sec.optional) out.push(`<label class="inline"><input type="checkbox" data-enable="${esc(sec.section)}" ${present ? "checked" : ""}> use this section</label>`);
+    for (const f of sec.fields) {
+      const path = sec.section ? [sec.section, f.key] : [f.key];
+      if (f.type === "sources") {
+        const recs = base[f.key] || [];
+        out.push(fieldRow(f, `<div data-list="${esc(path.join("."))}">${recs.map((r, i) => recordHtml(f, r, [...path, i])).join("")}</div>
+          <button class="b" type="button" data-add="${esc(path.join("."))}">Add</button>`));
+      } else if (f.type === "group") {
+        const g = base[f.key] || {};
+        out.push(fieldRow(f, f.fields.map(sub => `<div class="row"><span style="width:200px" class="muted">${esc(sub.label)}</span>${inputFor(sub, g[sub.key], [...path, sub.key])}</div>`).join("")));
+      } else if (f.type === "map") {
+        const m = base[f.key] || {};
+        const rowHtml = (k, v) => `<div class="row" data-maprow><input type="text" value="${esc(k)}" placeholder="extension" style="min-width:120px;width:120px">
+          <select>${f.choices.map(c => `<option ${c === v ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+          <button class="b danger" type="button" data-remove-row>Remove</button></div>`;
+        out.push(fieldRow(f, `<div data-map="${esc(path.join("."))}">${Object.entries(m).map(([k, v]) => rowHtml(k, v)).join("")}</div>
+          <button class="b" type="button" data-addmap="${esc(path.join("."))}">Add</button>
+          <template data-maptpl="${esc(path.join("."))}">${rowHtml("", f.choices[0])}</template>`));
+      } else {
+        out.push(fieldRow(f, inputFor(f, base[f.key], path)));
+      }
+    }
+    out.push(`</div>`);
+  }
+  const form = $("#s-form");
+  form.innerHTML = out.join("");
+  form.onclick = e => {
+    const t = e.target;
+    if (t.matches("[data-remove]")) t.closest(".rec").remove();
+    if (t.matches("[data-remove-row]")) t.closest("[data-maprow]").remove();
+    if (t.matches("[data-addmap]")) { const p = t.dataset.addmap; $(`[data-map="${p}"]`).insertAdjacentHTML("beforeend", $(`[data-maptpl="${p}"]`).innerHTML); }
+    if (t.matches("[data-add]")) {
+      const p = t.dataset.add, [sec, key] = p.includes(".") ? p.split(".") : [null, p];
+      const f = SCHEMA.find(s => (s.section || null) === sec).fields.find(x => x.key === key);
+      const list = $(`[data-list="${p}"]`);
+      list.insertAdjacentHTML("beforeend", recordHtml(f, {}, [...p.split("."), list.children.length + Date.now()]));
+    }
+  };
+}
+function readValue(el) {
+  const t = el.dataset.type;
+  if (t === "bool") return el.checked;
+  if (t === "int") return el.value === "" ? undefined : parseInt(el.value, 10);
+  if (t === "list") return el.value.split("\n").map(s => s.trim()).filter(Boolean);
+  return el.value.trim();
+}
+function collectForm() {
+  const data = {};
+  for (const sec of SCHEMA) {
+    const card = $(`[data-section="${sec.section || ""}"]`);
+    if (sec.optional && !$(`[data-enable="${sec.section}"]`, card).checked) continue;
+    const target = sec.section ? (data[sec.section] = {}) : data;
+    for (const f of sec.fields) {
+      const path = (sec.section ? [sec.section, f.key] : [f.key]).join(".");
+      if (f.type === "sources") {
+        target[f.key] = $$(`[data-list="${path}"] > .rec`, card).map(rec => {
+          const r = {};
+          $$("[data-path]", rec).forEach(el => { const k = el.dataset.path.split(".").pop(); const v = readValue(el);
+            if (v === undefined || (el.dataset.optional && v === "") || (Array.isArray(v) && !v.length && k === "exclude")) return; r[k] = v; });
+          return r;
+        });
+      } else if (f.type === "group") {
+        target[f.key] = {};
+        f.fields.forEach(sub => { const el = $(`[data-path="${path}.${sub.key}"]`, card); target[f.key][sub.key] = readValue(el); });
+      } else if (f.type === "map") {
+        const m = {};
+        $$(`[data-map="${path}"] [data-maprow]`, card).forEach(row => { const k = $("input", row).value.trim().replace(/^\./, "");
+          if (k) m[k] = $("select", row).value; });
+        target[f.key] = m;
+      } else if (f.type === "multi") {
+        target[f.key] = $$(`[data-path="${path}"]`, card).filter(el => el.checked).map(el => el.value);
+      } else {
+        const v = readValue($(`[data-path="${path}"]`, card));
+        if (v !== undefined) target[f.key] = v;
+      }
+    }
+  }
+  return data;
+}
+$("#s-save").onclick = async () => {
+  const msg = $("#s-msg");
+  try {
+    const r = mode === "raw" ? await api("/api/config/raw", {text: $("#s-raw").value}) : await api("/api/config", {data: collectForm()});
+    if (r.ok) { showMsg(msg, "Saved." + (r.backup ? " Previous file kept as " + r.backup : ""), true); await loadMeta(); await loadSettings(); }
+    else showMsg(msg, r.error, false);
+  } catch (e) { showMsg(msg, e.message, false); }
+};
+
+loadMeta().then(poll);
+</script>
+</body>
+</html>
