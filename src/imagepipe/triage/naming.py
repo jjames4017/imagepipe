@@ -15,6 +15,7 @@ original file name (without extension).
 from __future__ import annotations
 
 import contextlib
+import io
 import re
 import sys
 import unicodedata
@@ -278,6 +279,7 @@ class Geocoder:
 
     def __init__(self, enabled: bool = True):
         self.rg = None
+        self.loaded = False
         if enabled:
             try:
                 import reverse_geocoder
@@ -293,9 +295,15 @@ class Geocoder:
     def places(self, coords: list[tuple[float, float]]) -> list[str | None]:
         if not coords or self.rg is None:
             return [None] * len(coords)
-        # reverse_geocoder prints a loading message on stdout; keep stdout for reports
-        with contextlib.redirect_stdout(sys.stderr):
-            results = self.rg.search(coords, mode=1)
+        first = not self.loaded
+        if first:
+            print("Loading place names (offline)...", file=sys.stderr, flush=True)
+        # reverse_geocoder prints its own "Loading formatted geocoded file..." on stdout: swallow it
+        with contextlib.redirect_stdout(io.StringIO()):
+            results = self.rg.search(coords, mode=1, verbose=False)
+        if first:
+            self.loaded = True
+            print("Loading place names (offline)... done", file=sys.stderr, flush=True)
         out = []
         for r in results:
             name = (r.get("name") or "").strip()

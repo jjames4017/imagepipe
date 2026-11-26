@@ -8,13 +8,21 @@ query is running. Output goes to stderr, never to a pipe that is thrown away.
 
 from __future__ import annotations
 
+import collections
 import logging
 import os
+import re
 import sys
 import threading
 import time
 
 log = logging.getLogger("imagepipe")
+
+# The rate and ETA use the last few minutes, so a slow patch early on doesn't keep
+# the ETA climbing for the rest of the run. Until a run is WARMUP seconds old the
+# average since the start is used.
+RATE_WINDOW = 180.0
+WARMUP = 30.0
 
 
 def fmt_duration(seconds: float | None) -> str:
@@ -58,6 +66,8 @@ class Progress:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._last_log = self.start
+        self._samples: collections.deque = collections.deque()  # (time, count, bytes)
+        self.paused = 0.0  # seconds the process spent stopped (paused) - not counted as elapsed
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._render()
         self._thread.start()
@@ -87,15 +97,25 @@ class Progress:
 
     # -- internals -------------------------------------------------------
     def _run(self) -> None:
+        last = time.monotonic()
         while not self._stop.wait(self.interval):
+            now = time.monotonic()
+            # The timer thread wakes every `interval`. If far more time went by, the process
+            # was stopped (paused with SIGSTOP or Ctrl+Z): that time isn't elapsed work time.
+            gap = now - last - self.interval
+            if gap > max(5.0, self.interval):
+                with self._lock:
+                    self.paused += gap
+                    self._samples.clear()
+            last = now
             self._render()
 
     def line(self) -> str:
         with self._lock:
             count, nbytes, extra = self.count, self.bytes, self.extra
-        elapsed = time.monotonic() - self.start
-        rate = count / elapsed if elapsed > 0 else 0.0
-        bps = nbytes / elapsed if elapsed > 0 else 0.0
+        now = time.monotonic()
+        elapsed = now - self.start - self.paused
+        rate, bps = self._rates(now, elapsed, count, nbytes)
         parts = [f"[{self.label}]"]
         if self.total is not None:
             pct = (count / self.total * 100) if self.total else 100.0
@@ -122,6 +142,19 @@ class Progress:
             parts.append(extra)
         return " | ".join(parts)
 
+    def _rates(self, now: float, elapsed: float, count: int, nbytes: int) -> tuple[float, float]:
+        """Items/s and bytes/s over the last RATE_WINDOW seconds (whole run while warming up)."""
+        with self._lock:
+            samples = self._samples
+            samples.append((now, count, nbytes))
+            while len(samples) > 2 and samples[1][0] <= now - RATE_WINDOW:
+                samples.popleft()
+            t0, c0, b0 = samples[0]
+        if elapsed < WARMUP or now - t0 < WARMUP:
+            return (count / elapsed, nbytes / elapsed) if elapsed > 0 else (0.0, 0.0)
+        span = now - t0
+        return (count - c0) / span, (nbytes - b0) / span
+
     def _render(self, final: bool = False) -> None:
         text = self.line()
         try:
@@ -136,3 +169,39 @@ class Progress:
         if final or now - self._last_log >= 60:
             self._last_log = now
             log.info(text)
+
+
+COLUMNS = ("phase", "done", "pct", "rate", "data", "elapsed", "eta", "detail")
+_DONE_RE = re.compile(r"^([\d,]+(?:/[\d,]+)? \S+?)(?: \(\s*([\d.]+%)\))?$")
+
+
+def parse_line(line: str) -> dict[str, str] | None:
+    """Split a progress line into labelled columns (for the web UI). None if it isn't one.
+
+    "[Plan] | 117,656/252,593 files ( 46.6%) | 64 files/s | elapsed 00:30:32 | ETA 00:35:01 | folder: x"
+    -> phase=Plan, done=117,656/252,593 files, pct=46.6%, rate=64 files/s, elapsed=00:30:32,
+       eta=00:35:01, detail=folder: x
+    """
+    if not line.startswith("[") or "]" not in line:
+        return None
+    parts = line.split(" | ")
+    out = dict.fromkeys(COLUMNS, "")
+    out["phase"] = parts[0].strip()[1:].split("]", 1)[0]
+    detail = []
+    for part in parts[1:]:
+        part = part.strip()
+        m = _DONE_RE.match(part)
+        if not out["done"] and m:
+            out["done"], out["pct"] = m.group(1), m.group(2) or ""
+        elif not out["rate"] and part.endswith("/s") and " @ " not in part:
+            out["rate"] = part
+        elif not out["data"] and " @ " in part:
+            out["data"] = part
+        elif part.startswith("elapsed "):
+            out["elapsed"] = part[8:]
+        elif part.startswith("ETA "):
+            out["eta"] = part[4:]
+        elif part:
+            detail.append(part)
+    out["detail"] = " | ".join(detail)
+    return out

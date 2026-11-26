@@ -20,6 +20,7 @@ import multiprocessing
 import os
 import signal
 import sys
+import warnings
 
 from imagepipe import exiftool as exiftool_mod
 from imagepipe.catalogue import _insert_scan, scan as walk
@@ -65,6 +66,8 @@ _W: dict = {}
 
 def init_worker(opts: dict) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    # damaged EXIF is counted (exif_damaged), not printed - see meta.image_meta
+    warnings.filterwarnings("ignore", message=r"(Possibly )?[Cc]orrupt EXIF data")
     _W.clear()
     _W.update(opts)
     _W["et"] = None
@@ -125,6 +128,7 @@ def read_entry(item: tuple) -> dict:
         elif kind == "sidecar" and ext in ("xmp", "xmp_original"):
             meta = xmp_sidecar_meta(abs_path, size)
         out.update({k: v for k, v in meta.items() if k in READ_FIELDS and v is not None})
+        out["exif_damaged"] = meta.get("exif_damaged", 0)
     except Exception as exc:  # unreadable/corrupt files are recorded, not fatal
         out["catalogue_error"] = f"metadata: {type(exc).__name__}: {exc}"[:500]
     return out
@@ -180,7 +184,7 @@ def _write_row(t: tdb.TriageDB, r: dict, info: dict, run_id: int) -> None:
 
 
 def read_items(t: tdb.TriageDB, pool, items: list[tuple], meta_of: dict, run_id: int, progress: Progress,
-               batch_size: int = 500, errors_before: int = 0) -> int:
+               batch_size: int = 500, errors_before: int = 0, counts: dict | None = None) -> int:
     """Read files with the pool and write their rows. Returns the error count for these items.
 
     errors_before is the count from earlier pages, so the progress line shows the
@@ -191,6 +195,8 @@ def read_items(t: tdb.TriageDB, pool, items: list[tuple], meta_of: dict, run_id:
     for r in pool.imap_unordered(read_entry, items, chunksize=8):
         if r["catalogue_error"]:
             errors += 1
+        if counts is not None and r.get("exif_damaged"):
+            counts["exif_damaged"] = counts.get("exif_damaged", 0) + 1
         pending.append(r)
         progress.update(1, r["size"], extra=f"{errors_before + errors:,} problems")
         if len(pending) >= batch_size:
@@ -298,6 +304,7 @@ def run_scan(cfg: Config, source: Source, reread: str | None = None) -> dict:
         use_et = exiftool_ok()
         root = str(source.path)
         errors = 0
+        counts: dict = {"exif_damaged": 0}
         interrupted = False
         with Progress("3/3 Read", total=todo, total_bytes=todo_bytes) as p:
             pool = make_pool(tc.workers, use_et)
@@ -319,14 +326,14 @@ def run_scan(cfg: Config, source: Source, reread: str | None = None) -> dict:
                             "current_path": abs_path, "why": r["why"],
                         }
                         items.append((rel, to_fs(abs_path), os.path.basename(rel), r["size"], r["mtime"]))
-                    errors += read_items(t, pool, items, meta_of, run_id, p, errors_before=errors)
+                    errors += read_items(t, pool, items, meta_of, run_id, p, errors_before=errors, counts=counts)
                 pool.close()
             except KeyboardInterrupt:
                 interrupted = True
                 pool.terminate()
             finally:
                 pool.join()
-            summary.update(read=p.count, read_problems=errors)
+            summary.update(read=p.count, read_problems=errors, exif_damaged=counts["exif_damaged"])
         status = "interrupted" if interrupted else "finished"
         if interrupted:
             say("Interrupted. Everything read so far is saved; run the scan again to carry on.")

@@ -137,3 +137,55 @@ def test_delete_reports(web):
     app.runner.job = {"status": "running"}
     assert "job is running" in post(base, "/api/reports/delete", {"all": True})["error"]
     app.runner.job = None
+
+
+def _state(pid: int) -> str:
+    with open(f"/proc/{pid}/stat") as fh:
+        return fh.read().rsplit(")", 1)[1].split()[0]
+
+
+def test_pause_resume_and_stop_a_job(web, monkeypatch):
+    import subprocess
+    import sys as _sys
+
+    import imagepipe.web.server as server
+
+    base, cfg, vault, app = web
+    script = ("import subprocess, sys, time\n"
+              "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+              "print('child', child.pid, flush=True)\n"
+              "try:\n"
+              "    while True:\n"
+              "        print('[Work] | tick', flush=True); time.sleep(0.2)\n"
+              "except KeyboardInterrupt:\n"
+              "    child.kill(); sys.exit(130)\n")
+    real = subprocess.Popen
+    monkeypatch.setattr(server.subprocess, "Popen",
+                        lambda cmd, **kw: real([_sys.executable, "-c", script], **kw))
+    assert post(base, "/api/job/start", {"kind": "triage-scan", "options": {}})["ok"]
+    for _ in range(50):
+        lines = get(base, "/api/job")["job"]["lines"]
+        if any(x.startswith("child ") for x in lines):
+            break
+        time.sleep(0.1)
+    child = int(next(x for x in lines if x.startswith("child ")).split()[1])
+    main = app.runner.proc.pid
+
+    assert "No paused job" in post(base, "/api/job/resume", {})["error"]
+    assert post(base, "/api/job/pause", {})["ok"]
+    time.sleep(0.3)
+    assert get(base, "/api/job")["job"]["status"] == "paused"
+    assert _state(main) == "T" and _state(child) == "T"  # the whole job, workers included
+    assert "already running" in post(base, "/api/job/start", {"kind": "triage-plan", "options": {}})["error"]
+
+    assert post(base, "/api/job/resume", {})["ok"]
+    time.sleep(0.3)
+    assert get(base, "/api/job")["job"]["status"] == "running"
+    assert _state(main) != "T" and _state(child) != "T"
+
+    assert post(base, "/api/job/pause", {})["ok"]
+    assert post(base, "/api/job/stop", {})["ok"]  # stopping a paused job resumes it so it can stop cleanly
+    s = wait_job(base)
+    assert s["job"]["status"] == "interrupted", s["job"]
+    lines = s["job"]["lines"]
+    assert any("paused at" in x for x in lines) and any("resumed at" in x for x in lines)

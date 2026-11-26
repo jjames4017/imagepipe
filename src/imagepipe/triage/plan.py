@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 from imagepipe.config import Config
@@ -372,29 +373,46 @@ def plan_rows(cfg: Config, t: tdb.TriageDB, where: str = "", params: tuple = (),
     skipped_sources: set[str] = set()
 
     def work(progress):
-        for g in groups:
-            if g["source"] not in folder_of:
-                skipped_sources.add(g["source"])
-                continue
-            rows = t.db.execute(
-                f"SELECT * FROM files WHERE {base} AND source=? AND parent_id=? AND dir=? ORDER BY rel_path",
-                (*params, g["source"], g["parent_id"], g["dir"])).fetchall()
-            try:
-                for k, v in planner.plan_group(rows, folder_of[g["source"]], progress).items():
-                    counts[k] = counts.get(k, 0) + v
-                t.db.commit()
-            except Exception as exc:
-                # a folder that can't be planned is marked and skipped; the rest carry on
-                t.db.rollback()
-                log.exception("could not plan folder %s", g["dir"])
-                say(f"Problem planning folder '{g['dir']}': {exc} - its files are marked 'error', the rest carry on")
-                for r in rows:
-                    t.update(r["id"], status=tdb.ERROR)
-                    t.action(None, r, "error", r["current_path"], None, None, detail=f"plan: {exc}"[:500])
-                t.db.commit()
-                counts["error"] = counts.get("error", 0) + len(rows)
+        # Each folder is its own savepoint, so a folder that fails is undone on its own; the
+        # transaction is committed every couple of seconds rather than after every folder.
+        last_commit = time.monotonic()
+        try:
+            for g in groups:
+                if g["source"] not in folder_of:
+                    skipped_sources.add(g["source"])
+                    continue
+                rows = t.db.execute(
+                    f"SELECT * FROM files WHERE {base} AND source=? AND parent_id=? AND dir=? ORDER BY rel_path",
+                    (*params, g["source"], g["parent_id"], g["dir"])).fetchall()
                 if progress is not None:
-                    progress.update(len(rows))
+                    progress.set_extra(f"folder: {g['dir'] or '(top)'}")
+                t.db.execute("SAVEPOINT plan_folder")
+                try:
+                    for k, v in planner.plan_group(rows, folder_of[g["source"]], progress).items():
+                        counts[k] = counts.get(k, 0) + v
+                    t.db.execute("RELEASE plan_folder")
+                except KeyboardInterrupt:
+                    t.db.execute("ROLLBACK TO plan_folder")
+                    t.db.execute("RELEASE plan_folder")
+                    raise
+                except Exception as exc:
+                    # a folder that can't be planned is marked and skipped; the rest carry on
+                    t.db.execute("ROLLBACK TO plan_folder")
+                    t.db.execute("RELEASE plan_folder")
+                    log.exception("could not plan folder %s", g["dir"])
+                    say(f"Problem planning folder '{g['dir']}': {exc} - its files are marked 'error', "
+                        f"the rest carry on")
+                    for r in rows:
+                        t.update(r["id"], status=tdb.ERROR)
+                        t.action(None, r, "error", r["current_path"], None, None, detail=f"plan: {exc}"[:500])
+                    counts["error"] = counts.get("error", 0) + len(rows)
+                    if progress is not None:
+                        progress.update(len(rows))
+                if time.monotonic() - last_commit >= 2:
+                    t.db.commit()
+                    last_commit = time.monotonic()
+        finally:
+            t.db.commit()
 
     if quiet:
         work(None)

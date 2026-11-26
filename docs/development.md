@@ -38,7 +38,9 @@ mkdocs serve
   excluded folder and logs why.
 - **Progress for anything slow.** Anything that can take more than ~30 seconds
   uses `Progress`, shows a rate and an ETA where the total is known, and covers
-  every phase, including counting/scanning before the real work starts.
+  every phase, including counting/scanning before the real work starts. The
+  rate and ETA come from the last 3 minutes (the average since the start for
+  the first 30 seconds), so a slow patch doesn't keep the ETA climbing.
 - **Config, not code.** Paths, thresholds, keywords and service URLs belong in
   the config file.
 - **Test with generated files.** The test set must never contain personal

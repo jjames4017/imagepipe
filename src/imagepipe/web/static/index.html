@@ -39,7 +39,8 @@
   label.inline { display:inline-flex; gap:6px; align-items:center; margin-right:12px; }
   pre { font: 12.5px/1.45 var(--mono); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px;
         overflow:auto; white-space:pre-wrap; word-break:break-word; margin:0; }
-  #log { max-height:420px; } #progress { margin-bottom:8px; min-height:1.5em; color:var(--accent); }
+  #log { max-height:420px; } #progress-wrap { margin-bottom:8px; } #progress-table td { color:var(--accent); white-space:nowrap; }
+  #progress-table td.path { white-space:normal; }
   table { width:100%; border-collapse:collapse; font-size:12.5px; }
   th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
   th { color:var(--muted); font-weight:600; position:sticky; top:0; background:var(--card); }
@@ -114,9 +115,12 @@
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <h2 id="jobtitle">No job running</h2>
-        <button class="b danger" id="stop" disabled>Stop</button>
+        <span><button class="b" id="pause" disabled>Pause</button>
+        <button class="b danger" id="stop" disabled>Stop</button></span>
       </div>
-      <pre id="progress"></pre>
+      <div class="scroll" id="progress-wrap" hidden><table id="progress-table"><thead><tr>
+        <th>Phase</th><th>Done / total</th><th>%</th><th>Rate</th><th>Data</th><th>Elapsed</th><th>ETA</th><th>Detail</th>
+      </tr></thead><tbody id="progress-rows"></tbody></table></div>
       <pre id="log"></pre>
     </div>
     <div class="card">
@@ -255,19 +259,32 @@ $$("[data-job]").forEach(b => b.onclick = async () => {
   catch (e) { alert(e.message); }
 });
 $("#stop").onclick = async () => { if (confirm("Stop the running job? It stops cleanly and keeps everything done so far.")) await api("/api/job/stop", {}); };
+$("#pause").onclick = async () => {
+  try { await api($("#pause").dataset.paused === "1" ? "/api/job/resume" : "/api/job/pause", {}); }
+  catch (e) { alert(e.message); }
+  poll();
+};
 
 async function poll() {
   let s;
   try { s = await api("/api/job?since=" + lineCount); } catch { return; }
-  const j = s.job, running = j && (j.status === "running" || j.status === "stopping");
+  const j = s.job, running = j && ["running", "paused", "stopping"].includes(j.status);
   $$("[data-job]").forEach(b => b.disabled = running);
-  $("#stop").disabled = !running;
+  $("#stop").disabled = !running || j.status === "stopping";
+  const paused = j && j.status === "paused";
+  $("#pause").disabled = !j || !["running", "paused"].includes(j.status);
+  $("#pause").textContent = paused ? "Resume" : "Pause";
+  $("#pause").dataset.paused = paused ? "1" : "0";
   const chip = $("#jobchip");
-  chip.textContent = running ? `running: ${j.label}` : "idle"; chip.className = running ? "running" : "";
+  chip.textContent = running ? `${paused ? "paused" : "running"}: ${j.label}` : "idle"; chip.className = running ? "running" : "";
   if (j) {
     if (j.id !== lastJobId) { lastJobId = j.id; lineCount = 0; $("#log").textContent = ""; return poll(); }
     $("#jobtitle").innerHTML = `${esc(j.label)} <span class="pill">${esc(j.status)}</span> <span class="muted" style="font-weight:400;font-size:12px">imagepipe ${esc(j.argv.join(" "))}</span>`;
-    $("#progress").textContent = running ? j.progress.join("\n") : "";
+    const rows = running ? (j.progress_rows || []) : [];
+    $("#progress-wrap").hidden = !rows.length;
+    $("#progress-rows").innerHTML = rows.map(r => `<tr><td>${esc(r.phase)}</td><td>${esc(r.done)}</td>
+      <td>${esc(r.pct)}</td><td>${esc(r.rate)}</td><td>${esc(r.data)}</td><td>${esc(r.elapsed)}</td>
+      <td>${esc(r.eta)}</td><td class="path">${esc(r.detail)}</td></tr>`).join("");
     if (j.lines.length) {
       const log = $("#log"), atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
       log.textContent += (log.textContent ? "\n" : "") + j.lines.join("\n");

@@ -247,6 +247,8 @@ class Applier:
                 if not page:
                     break
                 for row in page:
+                    p.set_extra(f"{self.stats.get('errors', 0):,} errors | moving "
+                                f"{os.path.basename(row['logical_path'] or row['rel_path'] or '')}")
                     try:
                         self.move_one(row)
                     except KeyboardInterrupt:
@@ -259,7 +261,7 @@ class Applier:
                         self.bump("errors")
                         log.exception("move failed: %s", row["current_path"])
                     done += 1
-                    p.update(1, extra=f"{self.stats.get('errors', 0):,} errors")
+                    p.update(1)
                 self.t.db.commit()
         return done
 
