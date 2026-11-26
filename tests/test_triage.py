@@ -924,3 +924,55 @@ def test_plan_url_encoded_names_and_office_ddmmyy(env):
     assert "310516" not in mins["smartname"]
     far = r["file-cabinet:Weekly meetings/Minutes 310599.docx"]  # 1999 is nowhere near the 2015 Office date
     assert far["date_source"] == "office" and far["name_date"].startswith("2015-11-04")
+
+
+# ------------------------------------------------- 0.3.9: #35-#39
+def cam_jpeg(model: str, date: str) -> bytes:
+    exif = Image.Exif()
+    exif[0x010F] = "EASTMAN KODAK COMPANY"
+    exif[0x0110] = model
+    exif.get_ifd(0x8769)[0x9003] = date
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 30)).save(buf, "JPEG", exif=exif.tobytes())
+    return buf.getvalue()
+
+
+def test_names_hex_ids_joined_months_quarantine_original():
+    from imagepipe.triage.naming import date_in_text, smartname, with_original_name
+
+    assert date_in_text("11WTBDMay2009TrsLst") == "2009-05"
+    assert date_in_text("ReportSeptember2015") == "2015-09"
+    assert date_in_text("Germany2009") == "2009"
+    name, _ = smartname(None, None, ["Cards"], "!cid_3374B1F2973C4F57B07B4D160F62B985@EvaAnnPC")
+    assert name == "Cards-cid-EvaAnnPC"
+    name, _ = smartname(None, None, ["x"], "scan 123e4567-e89b-12d3-a456-426614174000 receipt")
+    assert name == "receipt"  # UUID gone (and the leading "scan", as before)
+    assert with_original_name("Harddrive-WTB-Dansey", "B8883000") == "Harddrive-WTB-Dansey-B8883000"
+    long = with_original_name("A-very-long-folder-name-" * 5, "Original File (2)", 40)
+    assert long.endswith("Original-File-2") and len(long) <= 40
+    assert with_original_name("Docs-B8883000", "B8883000") == "Docs-B8883000"
+
+
+def test_plan_drifting_clock_ebook_years_quarantine_names(env):
+    cfg, vault = env
+    build(vault / "file cabinet", {
+        "Pics/Old/100_0907.jpg": cam_jpeg("EASYSHARE C330", "2006:01:01 12:00:22"),
+        "Pics/Camera Pics 19-03-2014/100_2422.jpg": cam_jpeg("EASYSHARE C330", "2006:01:25 15:44:58"),
+        "Pics/Unsorted/100_2500.jpg": cam_jpeg("EASYSHARE C330", "2006:02:01 10:00:00"),
+        "Pics/Other cam 19-03-2014/IMG_1.jpg": cam_jpeg("PowerShot", "2006:01:25 15:44:58"),
+        "ebooks/reima/Red Inferno_ 1945 - Robert Conroy.epub": b"PK\x03\x04" + b"\x00" * 40,
+        "WTB 2008-2009/B8883000": b"\x8f\x00\x13\x37" * 64,
+    })
+    assert run_scan(cfg, cfg.triage.source("file-cabinet"))["status"] == "finished"
+    assert run_plan(cfg)["status"] == "finished"
+    r = rows(cfg)
+    drift = r["file-cabinet:Pics/Camera Pics 19-03-2014/100_2422.jpg"]
+    assert (drift["name_date"], drift["date_source"]) == ("2014-03-19", "folder")
+    alone = r["file-cabinet:Pics/Unsorted/100_2500.jpg"]  # nothing better: kept, but marked
+    assert (alone["name_date"], alone["date_source"]) == ("2006-02-01_100000", "exif-default-clock")
+    other = r["file-cabinet:Pics/Other cam 19-03-2014/IMG_1.jpg"]  # a different camera is trusted
+    assert (other["name_date"], other["date_source"]) == ("2006-01-25_154458", "exif")
+    book = r["file-cabinet:ebooks/reima/Red Inferno_ 1945 - Robert Conroy.epub"]
+    assert book["name_date"] != "1945" and "1945" in book["smartname"]
+    q = r["file-cabinet:WTB 2008-2009/B8883000"]
+    assert q["bucket"] == "quarantine/unknown-type" and q["smartname"].endswith("B8883000")

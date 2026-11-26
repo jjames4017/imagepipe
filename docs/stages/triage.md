@@ -92,7 +92,11 @@ Two exceptions:
 - **Camera clocks that were never set**: an EXIF date of 1 January 1970, 1980
   or 2000-2010, at around midnight or noon (or with no time), is used only if
   no date is found in a sidecar, the file name or the folders. When it is used
-  anyway, its source shows as e.g. `exif-default-clock`.
+  anyway, its source shows as e.g. `exif-default-clock`. A camera model that
+  has shown a default date is distrusted for the rest of that year too (its
+  clock started at the default and ran on from there).
+- **Ebooks**: a year on its own in an ebook's file name is part of the title
+  (`Red Inferno_ 1945`), not its date, and stays in the smartname.
 
 A compact `YYYYMMDDHHMMSS` timestamp in a file name
 (`DVR_20121124004613.mp4`) counts as a date and time. A 6-digit `DDMMYY`
@@ -103,7 +107,12 @@ counts when it is within one year of the Office created date.
 
 URL-encoded names (`Cliff%20Edwards`) are decoded before dates and smartnames
 are worked out; the folders on disk are not changed. Generic titles
-(`Track 23`, `Chapter 4`, `Untitled`) are never used as smartnames.
+(`Track 23`, `Chapter 4`, `Untitled`) are never used as smartnames. Month
+names joined to other letters count (`WTBDMay2009` -> `2009-05`). UUIDs and
+runs of 16+ hex characters are left out of smartnames.
+
+Files going to `quarantine/...` always end with their original file name, so
+they can be recognised when reviewing (`..._Harddrive-WTB-Dansey-B8883000`).
 
 When the date comes from inside the file, a sidecar or the file name and a time
 is known, the time is added: `2016-05-15_064331` (or `_0643` without seconds).
