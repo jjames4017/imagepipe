@@ -28,6 +28,7 @@ nav:
       - Manifest database: manifest.md
   - Stages:
       - Catalogue: stages/catalogue.md
+      - Triage: stages/triage.md
   - Notifications: notifications.md
   - Development: development.md
   - Roadmap: roadmap.md

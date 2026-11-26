@@ -11,8 +11,11 @@ to an `/excluded/<reason>/` folder and logged with its original path.
 
 ## Status
 
-Version 0.1: the foundation and **Catalogue** mode (a read-only inventory of a
-folder) are built. The pipeline stages are being added in phases - see
+Version 0.2: the foundation, **Catalogue** mode (a read-only inventory of a
+folder) and **Triage** (sorts mixed folder trees - photos, documents, archives
+and everything else - into the pipeline's inbox, a document staging folder,
+sorted type folders or quarantine, renaming each file and logging every
+action; see [docs/stages/triage.md](docs/stages/triage.md)) are built. The pipeline stages are being added in phases - see
 [docs/roadmap.md](docs/roadmap.md).
 
 ## Quick start

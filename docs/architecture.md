@@ -30,7 +30,7 @@ flowchart LR
 |---|---|---|
 | - | **Catalogue** | Read-only inventory of a source before anything is fed in |
 | 1 | Inbox | Files arrive here from the feeder or a manual drop |
-| 2 | ID check + fingerprint | Reads an existing pipeline ID (re-entry check), otherwise assigns one; SHA-256, pixel hash, perceptual hashes for all 8 rotations/mirrors |
+| 2 | ID check + fingerprint | Reads an existing pipeline ID from the metadata or the `<ID>_` file-name prefix (re-entry check), otherwise assigns one; SHA-256, pixel hash, perceptual hashes for all 8 rotations/mirrors |
 | 3 | PDFs | Identical PDFs out, document PDFs out, photo pages split by ScanSplitter; crops re-enter at stage 2 |
 | 4 | Exact dupes | Byte-identical and pixel-identical matches against every file before |
 | 5 | Classify | Photo, document, screenshot or meme (SigLIP/CLIP, OCR text density, vision-model tiebreak) |

@@ -18,11 +18,21 @@ disagree, this page describes the intent.
 
 ## Pipeline ID
 
+- Format: `IP` + 16 Crockford base32 characters (e.g. `IP01JDX4Q8M3K7ZB2R`) - creation
+  time in milliseconds, then 35 random bits. IDs sort by age and never repeat.
+  Made by `imagepipe.ids`, shared by triage and every stage.
+- Stored in the file as `XMP-dc:Identifier` and at the front of the file name:
+  `<ID>_...`.
+- Triage gives IDs to everything it sorts but only puts them in the file name
+  (it changes no file contents). Stage 2 reads an ID from the file name as well
+  as from the metadata, keeps it, and writes it into the file with its other
+  tags.
 - Assigned at stage 2 the first time a file is seen, written into the file's
   own metadata and recorded in the manifest. It survives A-Eye's renaming.
 - The manifest also keeps the original hashes, so a file can be traced after its
   name or metadata change.
-- **Re-entry check:** stage 2 first looks for an existing ID.
+- **Re-entry check:** stage 2 first looks for an existing ID, in the file's
+  metadata and at the front of its name.
   - ID found and the file is identical → `01-exact-dup`, reason "re-entry".
   - ID found but the image has changed → through the similar-dupes check against
     that photo; normally `08-size-dup`, or the swap rule if it is better.

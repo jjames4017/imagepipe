@@ -123,7 +123,7 @@ def _content(head: bytes, ext: str) -> tuple[str, str] | None:
         return "image", "image/vnd.adobe.photoshop"
     if h[:2] == b"BM" and (ext in ("bmp", "dib") or h[6:10] == b"\x00\x00\x00\x00"):
         return "image", "image/bmp"
-    if b"%PDF" in h[:1024]:
+    if h[:5] == b"%PDF-":
         return "pdf", "application/pdf"
     if h[:4] in (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"):
         if ext in OFFICE_ZIP_EXT:
@@ -169,6 +169,10 @@ def _content(head: bytes, ext: str) -> tuple[str, str] | None:
         return "audio", "audio/ogg"
     if h[:4] == b"\x00\x05\x16\x07":
         return "junk", "application/applefile"
+    # PDFs may have a little junk before the header. Checked after every other
+    # signature, so an archive that holds a PDF is not mistaken for one.
+    if b"%PDF-" in h[:1024]:
+        return "pdf", "application/pdf"
     stripped = h.lstrip(b"\xef\xbb\xbf \t\r\n").lower()
     if stripped.startswith(b"<!doctype html") or stripped.startswith(b"<html"):
         return "document", "text/html"
