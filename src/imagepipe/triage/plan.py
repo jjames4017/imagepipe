@@ -72,6 +72,59 @@ def _dest_dir(tc, source_folder: str, bucket: str, logical_dir: str) -> Path:
     return base.joinpath(source_folder, *parts)
 
 
+WEB_BUCKET = "sorted/web-pages"
+PAGE_EXT = {"htm", "html", "shtml", "xhtml"}
+SINGLE_FILE_PAGE_EXT = {"mht", "mhtml"}
+WEB_ASSET_EXT = {"css", "js", "htm", "html"}
+
+
+class WebPages:
+    """Saved web pages in one source (or one archive): Page.htm + its Page_files folder.
+
+    A "_files" folder counts when its page is beside it, or - without its page - when
+    it holds web files (.css/.js/.htm), so an ordinary folder called "my_files" full
+    of photos is not caught.
+    """
+
+    def __init__(self, rows):
+        pages: set[tuple[str, str]] = set()   # (dir, lower stem) of .htm/.html files
+        asset_dirs: set[str] = set()
+        dirs: set[str] = set()
+        for r in rows:
+            d, ext = r["dir"] or "", (r["ext"] or "").lower()
+            dirs.add(d)
+            name = os.path.basename(r["rel_path"])
+            if ext in PAGE_EXT:
+                pages.add((d, name[: -(len(ext) + 1)].lower()))
+            if ext in WEB_ASSET_EXT:
+                asset_dirs.add(d)
+        self.page_dirs: set[str] = set()  # lower-cased "_files" folders (full logical dir)
+        self.pages = set()                # (dir, lower stem) of pages whose folder exists
+        for d in dirs:
+            for i, part in enumerate(parts := d.split("/")):
+                if not part.lower().endswith("_files") or len(part) <= 6:
+                    continue
+                folder = "/".join(parts[: i + 1])
+                parent, stem = "/".join(parts[:i]), part[:-6].lower()
+                has_page = (parent, stem) in pages
+                has_assets = any(a == folder or a.startswith(folder + "/") for a in asset_dirs)
+                if has_page or has_assets:
+                    self.page_dirs.add(folder.lower())
+                    if has_page:
+                        self.pages.add((parent, stem))
+
+    def in_page_folder(self, d: str) -> bool:
+        parts = (d or "").lower().split("/")
+        return any("/".join(parts[: i + 1]) in self.page_dirs for i in range(len(parts)))
+
+    def is_page(self, r) -> bool:
+        ext = (r["ext"] or "").lower()
+        if ext in SINGLE_FILE_PAGE_EXT:
+            return True
+        name = os.path.basename(r["rel_path"])
+        return ext in PAGE_EXT and (r["dir"] or "", name[: -(len(ext) + 1)].lower()) in self.pages
+
+
 class Planner:
     def __init__(self, cfg: Config, t: tdb.TriageDB):
         self.cfg = cfg
@@ -79,6 +132,15 @@ class Planner:
         self.t = t
         self._geo = None
         self.used_ids: set[str] = set()
+        self._web: dict[tuple[str, int], WebPages] = {}
+
+    def web(self, source: str, parent_id: int) -> WebPages:
+        key = (source, parent_id)
+        if key not in self._web:
+            rows = self.t.db.execute("SELECT dir, rel_path, ext FROM files WHERE source=? AND parent_id=?",
+                                     key).fetchall()
+            self._web[key] = WebPages(rows)
+        return self._web[key]
 
     @property
     def geo(self) -> Geocoder:
@@ -103,8 +165,28 @@ class Planner:
     def plan_group(self, rows: list, source_folder: str, progress: Progress | None) -> dict[str, int]:
         tc = self.tc
         counts: dict[str, int] = {}
+        if rows:
+            web = self.web(rows[0]["source"], rows[0]["parent_id"])
+            if web.in_page_folder(rows[0]["dir"]):
+                # everything in a saved page's "_files" folder: moved with the page, names kept
+                now = self.t.now()
+                for r in rows:
+                    dest = _dest_dir(tc, source_folder, WEB_BUCKET, r["dir"]) / os.path.basename(r["rel_path"])
+                    self.t.update(r["id"], triage_id=self._pick_id(r), bucket=WEB_BUCKET, rule="web-page-files",
+                                  name_date=None, date_source="kept-name", smartname=None,
+                                  smartname_source="kept-name", dest_path=str(dest), companion_of=None,
+                                  status=tdb.PLANNED, planned_at=now)
+                    if progress is not None:
+                        progress.update(1)
+                return {WEB_BUCKET: len(rows)} if rows else {}
+        else:
+            web = None
         by_id = {r["id"]: r for r in rows}
         decided: dict[int, tuple[str, str]] = {r["id"]: classify(r, tc.bucket_overrides) for r in rows}
+        for r in rows:
+            if web is not None and web.is_page(r) and decided[r["id"]][0] not in ("quarantine/zero-byte",
+                                                                                 "quarantine/system-junk"):
+                decided[r["id"]] = (WEB_BUCKET, "web-page")
         by_name = {os.path.basename(r["rel_path"]).lower(): r for r in rows}
         media_by_stem: dict[str, list] = {}
         for r in rows:

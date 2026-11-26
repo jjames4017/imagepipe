@@ -689,3 +689,37 @@ def test_time_in_name_date_and_not_in_smartname():
     assert descriptive_filename("Board report 20191108_0930 final") == "Board report final"
     name, _ = smartname(None, None, ["Docs", "Review_Griffith"], "WP_20160515_06_43_31_Pro")
     assert "06" not in name and "Pro" not in name
+
+
+# ------------------------------------------------- #17 saved web pages
+def test_saved_web_pages_stay_together(env):
+    cfg, vault = env
+    html = b"<!DOCTYPE html><html><head><title>Gwlad</title></head><body><img src='Gwlad_files/logo.gif'></body></html>"
+    build(vault / "file cabinet", {
+        "Genealogy/Gwlad.htm": html,
+        "Genealogy/Gwlad_files/logo_top (3).gif": jpeg(),
+        "Genealogy/Gwlad_files/style.css": b"body { color: red; }\n",
+        "Genealogy/Gwlad_files/sub/deep.jpg": jpeg(),
+        "Genealogy/Lonely.html": html,
+        "Saved/Old page_files/a.css": b"p { margin: 0; }\n",
+        "Saved/Old page_files/pic.jpg": jpeg(),
+        "Mine/my_files/holiday.jpg": jpeg(),
+        "Saved/Whole page.mht": b"From: <Saved by Windows Internet Explorer>\r\nMIME-Version: 1.0\r\n\r\nhello\r\n",
+    })
+    assert run_scan(cfg, cfg.triage.source("file-cabinet"))["status"] == "finished"
+    assert run_plan(cfg)["status"] == "finished"
+    r = rows(cfg)
+    root = vault / "sorted" / "web-pages" / "file cabinet"
+    page = r["file-cabinet:Genealogy/Gwlad.htm"]
+    assert page["bucket"] == "sorted/web-pages" and page["rule"] == "web-page"
+    assert Path(page["dest_path"]).parent == root / "Genealogy"
+    assert Path(page["dest_path"]).name.startswith(page["triage_id"] + "_")  # the page gets an ID name
+    for rel in ("Gwlad_files/logo_top (3).gif", "Gwlad_files/style.css", "Gwlad_files/sub/deep.jpg"):
+        x = r[f"file-cabinet:Genealogy/{rel}"]
+        assert x["bucket"] == "sorted/web-pages" and x["rule"] == "web-page-files", rel
+        assert x["dest_path"] == str(root / "Genealogy" / rel), rel  # folder and names kept
+        assert x["triage_id"]
+    assert r["file-cabinet:Genealogy/Lonely.html"]["bucket"] == "docupipe"  # no _files folder: a normal document
+    assert r["file-cabinet:Saved/Old page_files/pic.jpg"]["dest_path"] == str(root / "Saved" / "Old page_files" / "pic.jpg")
+    assert r["file-cabinet:Mine/my_files/holiday.jpg"]["bucket"] == "imagepipe"  # not a web folder
+    assert r["file-cabinet:Saved/Whole page.mht"]["bucket"] == "sorted/web-pages"
