@@ -96,3 +96,48 @@ def test_cli(tmp_path, capsys):
     assert cmd_layered_find(cfg, args) == 2
     args = build_parser().parse_args(["layered", "render", str(src / "poster.psd"), "--out", str(tmp_path / "r")])
     assert cmd_layered_render(cfg, args) == 0 and (tmp_path / "r" / "poster.jpg").exists()
+
+
+def test_move_listed_keeps_folders_and_follows_in_triage(tmp_path):
+    import sqlite3
+
+    root = tmp_path / "vault" / "imagepipe"
+    (root / "file cabinet" / "a").mkdir(parents=True)
+    make_psd(root / "file cabinet" / "a" / "poster.psd")
+    make_tiffs(root / "file cabinet" / "b")
+    res = layered.find([root], tmp_path / "reports", quiet=True)
+    csv_path = Path(res["folder"]) / "layered.csv"
+    to = tmp_path / "vault" / "sorted" / "specials"
+
+    dry = layered.move_listed(csv_path, root, to, tmp_path / "reports", dry_run=True)
+    assert dry["would-move"] == 3 and (root / "file cabinet" / "a" / "poster.psd").exists() and not to.exists()
+
+    class FakeT:  # the bits of TriageDB that move_listed uses
+        def __init__(self, path):
+            self.db = sqlite3.connect(path)
+            self.db.row_factory = sqlite3.Row
+            self.db.execute("CREATE TABLE files (id INTEGER PRIMARY KEY, current_path, dest_path, bucket, rule, "
+                            "triage_id)")
+            self.db.execute("INSERT INTO files (current_path, bucket, triage_id) VALUES (?, 'imagepipe', 'IPX')",
+                            (str(root / "file cabinet" / "a" / "poster.psd"),))
+            self.actions = []
+
+        def update(self, fid, **cols):
+            sets = ", ".join(f"{k}=?" for k in cols)
+            self.db.execute(f"UPDATE files SET {sets} WHERE id=?", (*cols.values(), fid))
+
+        def action(self, run_id, row, action, from_path, to_path, rule, detail=""):
+            self.actions.append((action, from_path, to_path))
+
+    t = FakeT(tmp_path / "t.db")
+    res = layered.move_listed(csv_path, root, to, tmp_path / "reports", triage_db=t)
+    assert res["moved"] == 3 and "error" not in res
+    assert (to / "file cabinet" / "a" / "poster.psd").exists()
+    assert (to / "file cabinet" / "b" / "layered.tif").exists() and (to / "file cabinet" / "b" / "zstd.tif").exists()
+    assert not (root / "file cabinet" / "a").exists()  # emptied folders removed
+    assert (root / "file cabinet" / "b" / "plain.tif").exists()  # not on the list: stays
+    row = t.db.execute("SELECT * FROM files").fetchone()
+    assert row["current_path"] == str(to / "file cabinet" / "a" / "poster.psd") and row["bucket"] == "sorted/specials"
+    assert t.actions and t.actions[0][0] == "moved"
+    again = layered.move_listed(csv_path, root, to, tmp_path / "reports")
+    assert again["missing"] == 3  # already moved: skipped, nothing overwritten

@@ -22,6 +22,15 @@ DOCUPIPE_EXT = {
 # Only these are extracted. Zip (or other archive) content under any other
 # extension is not an archive to unpack: .xlsm, .vsdx, .zed ... would lose the original.
 ARCHIVE_EXTRACT_EXT = {"zip", "rar", "7z", "tar", "tgz", "tbz2", "txz", "gz", "bz2", "xz", "cab"}
+# Design, vector and other "special" image files: kept aside in sorted/specials for review
+# one by one, not sent to the photo pipeline (decided 27 Nov 2026, #55). TIFFs that are
+# multi-page, layered or unreadable join them - that needs the file itself, see plan.py.
+SPECIAL_EXT = {
+    "psd", "psb", "xcf", "kra", "afdesign", "afphoto", "indd",            # layered / design
+    "svg", "svgz", "eps", "ai", "cdr", "wmf", "emf", "ps", "dxf", "dwg",  # vector / CAD
+    "mpo", "ico",                                                         # stereo pairs, icons
+}
+
 # Temporary, partial-download and automatic backup files: quarantined as junk.
 JUNK_EXT = {"tmp", "crdownload", "asd", "wbk"}
 
@@ -91,6 +100,8 @@ def classify(row, overrides: dict[str, str]) -> tuple[str, str]:
         return "quarantine/system-junk", "office-lock-file"
     if name.lower() in JUNK_NAMES:  # by name, so a name added later applies without a re-scan (#42)
         return "quarantine/system-junk", "system-junk-file"
+    if ext in SPECIAL_EXT and kind not in ("empty", "junk"):
+        return "sorted/specials", f"special-{ext}"
     if kind == "junk":
         return "quarantine/system-junk", "system-junk-file"
     if err.startswith("read:"):

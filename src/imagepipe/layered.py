@@ -133,6 +133,24 @@ def _tiff_first_ifd(path: str) -> dict:
     }
 
 
+def special_tiff(path: str, unreadable: bool = False) -> str | None:
+    """Why a TIFF belongs in sorted/specials ('pages', 'layered', 'unreadable'), or None.
+
+    Only the headers are read; `unreadable` is the scan's verdict (it had a read problem).
+    """
+    try:
+        t = _tiff_first_ifd(path)
+    except (OSError, ValueError, struct.error):
+        return "unreadable"
+    if t.get("photoshop_layers"):
+        return "layered"
+    if (t.get("pages") or 1) > 1:
+        return "pages"
+    if unreadable:
+        return "unreadable"
+    return None
+
+
 def _pillow_can_read(path: str) -> bool:
     try:
         with Image.open(path) as im:
@@ -327,3 +345,74 @@ def render(path: str, out_dir: Path, quality: int = 95) -> tuple[Path, str]:
         dest = out_dir / f"{stem}.jpg"
         im.convert("RGB").save(dest, "JPEG", quality=quality, subsampling=0)
     return dest, how
+
+
+# ----------------------------------------------------------------- moving the reviewed list
+def move_listed(csv_path: Path, root: Path, to: Path, report_dir: Path, tz=None, dry_run: bool = False,
+                triage_db=None) -> dict:
+    """Move every file in a `layered find` CSV from under `root` to the same place under `to`.
+
+    Same safe move as triage (hard link + same-file check, never overwrites; copy + SHA-256
+    check across file systems). A file no longer at its path is skipped. Every move goes in
+    moves.csv; with `triage_db` (a TriageDB) the triage record follows the file too.
+    """
+    from imagepipe.triage.apply import MoveError, free_name, transfer
+
+    rows = list(csv.DictReader(open(csv_path, encoding="utf-8", newline="")))
+    root_s, stamp = os.path.realpath(root), datetime.now(tz).strftime("%Y%m%d-%H%M%S")
+    folder = report_dir / f"move-{'dry-run-' if dry_run else ''}{stamp}"
+    folder.mkdir(parents=True, exist_ok=True)
+    counts: Counter = Counter()
+    total_bytes = sum(int(r.get("size_bytes") or 0) for r in rows)
+    with open(folder / "moves.csv", "w", newline="", encoding="utf-8") as fh, \
+            Progress("Move" if not dry_run else "Move (dry run)", total=len(rows), total_bytes=total_bytes) as p:
+        w = csv.writer(fh)
+        w.writerow(["result", "from", "to", "detail"])
+        for r in rows:
+            src = r["path"]
+            real = os.path.realpath(src)
+            if not real.startswith(root_s + os.sep):
+                counts["outside-root"] += 1
+                w.writerow(["skipped", src, "", f"not under {root}"])
+            elif not os.path.isfile(src):
+                counts["missing"] += 1
+                w.writerow(["skipped", src, "", "no longer there"])
+            else:
+                dest = free_name(to / os.path.relpath(real, root_s))
+                if dry_run:
+                    counts["would-move"] += 1
+                    w.writerow(["would move", src, str(dest), ""])
+                else:
+                    try:
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        method = transfer(src, dest, r.get("sha256") or None, "auto")
+                        counts["moved"] += 1
+                        w.writerow(["moved", src, str(dest), method])
+                        if triage_db is not None:
+                            _follow_in_triage(triage_db, src, str(dest))
+                    except (MoveError, OSError) as exc:
+                        counts["error"] += 1
+                        w.writerow(["error", src, str(dest), str(exc)])
+            fh.flush()
+            p.update(1, int(r.get("size_bytes") or 0), extra=", ".join(f"{v:,} {k}" for k, v in counts.items()))
+    if not dry_run:
+        _remove_empty_dirs(root_s)
+    return {"folder": str(folder), **counts}
+
+
+def _follow_in_triage(t, src: str, dest: str) -> None:
+    row = t.db.execute("SELECT * FROM files WHERE current_path = ?", (src,)).fetchone()
+    if row is None:
+        return
+    t.update(row["id"], current_path=dest, dest_path=dest, bucket="sorted/specials", rule="special-review")
+    t.action(None, row, "moved", src, dest, "special-review", detail="imagepipe layered move")
+    t.db.commit()
+
+
+def _remove_empty_dirs(root: str) -> None:
+    for dirpath, _dirs, _files in os.walk(root, topdown=False):
+        if dirpath != root:
+            try:
+                os.rmdir(dirpath)
+            except OSError:
+                pass

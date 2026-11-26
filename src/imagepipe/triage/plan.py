@@ -25,6 +25,7 @@ from imagepipe.ids import id_from_name, new_id
 from imagepipe.progress import Progress
 from imagepipe.triage import db as tdb
 from imagepipe.triage.kinds import classify
+from imagepipe.layered import special_tiff
 from imagepipe.triage.meta import is_generic_title
 from imagepipe.triage.naming import (Geocoder, build_name, date_from_mtime, date_from_path,
                                      ddmmyy_in, descriptive_filename, is_default_clock, name_date_of, smartname,
@@ -272,6 +273,11 @@ class Planner:
             if web is not None and web.is_page(r) and decided[r["id"]][0] not in ("quarantine/zero-byte",
                                                                                  "quarantine/system-junk"):
                 decided[r["id"]] = (WEB_BUCKET, "web-page")
+        for r in rows:  # multi-page, layered or unreadable TIFFs go to specials too (#55)
+            if (r["ext"] or "").lower() in ("tif", "tiff") and decided[r["id"]][0] == "imagepipe":
+                why = special_tiff(r["current_path"], bool(r["catalogue_error"]))
+                if why:
+                    decided[r["id"]] = ("sorted/specials", f"special-tiff-{why}")
         by_name = {os.path.basename(r["rel_path"]).lower(): r for r in rows}
         media_by_stem: dict[str, list] = {}
         for r in rows:
