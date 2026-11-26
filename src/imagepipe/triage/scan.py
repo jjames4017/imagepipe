@@ -20,9 +20,10 @@ import signal
 import sys
 
 from imagepipe import exiftool as exiftool_mod
-from imagepipe.catalogue import scan as walk
+from imagepipe.catalogue import _insert_scan, scan as walk
 from imagepipe.config import Config, Source
 from imagepipe.detect import HEAD_BYTES, OFFICE_ZIP_EXT, detect, extension
+from imagepipe.fspath import to_fs
 from imagepipe.metadata import HEIF
 from imagepipe.progress import Progress, fmt_bytes
 from imagepipe.triage import db as tdb
@@ -120,26 +121,39 @@ def exiftool_ok() -> bool:
 
 
 # ---------------------------------------------------------------- main side
-def _write_rows(t: tdb.TriageDB, results: list[dict], meta_of: dict, run_id: int) -> None:
-    now = t.now()
+def _write_rows(t: tdb.TriageDB, results: list[dict], meta_of: dict, run_id: int) -> int:
+    """Record read results. A file that can't be recorded is logged and skipped. Returns failures."""
+    failed = 0
     for r in results:
         info = meta_of.pop(r["key"])
-        cols = {f: r[f] for f in READ_FIELDS}
-        if info.get("fid"):
-            # changed or reappeared: read again and plan again (keeps its ID)
-            t.update(info["fid"], **cols, status=tdb.CATALOGUED, bucket=None, rule=None, dest_path=None,
-                     companion_of=None, last_seen_run=run_id)
-            t.action(run_id, t.get(info["fid"]), "re-read", from_path=info["current_path"],
-                     detail="changed on disk since last read")
-        else:
-            names = ["source", "parent_id", "rel_path", "logical_path", "dir", "origin", "current_path",
-                     *READ_FIELDS, "status", "first_seen_run", "last_seen_run", "updated_at"]
-            vals = [info["source"], info["parent_id"], info["rel_path"], info["logical_path"], info["dir"],
-                    info["origin"], info["current_path"], *cols.values(), tdb.CATALOGUED, run_id, run_id, now]
-            t.db.execute(f"INSERT INTO files ({', '.join(names)}) VALUES ({', '.join('?' * len(names))})", vals)
-        if r["catalogue_error"]:
-            log.info("read problem: %s: %s", info["current_path"], r["catalogue_error"])
+        try:
+            _write_row(t, r, info, run_id)
+        except Exception as exc:
+            failed += 1
+            log.error("could not record %s: %s", info["current_path"], exc)
+            print(f"Problem recording {info['current_path']}: {exc} - skipped, the run carries on",
+                  file=sys.stderr, flush=True)
     t.db.commit()
+    return failed
+
+
+def _write_row(t: tdb.TriageDB, r: dict, info: dict, run_id: int) -> None:
+    now = t.now()
+    cols = {f: r[f] for f in READ_FIELDS}
+    if info.get("fid"):
+        # changed or reappeared: read again and plan again (keeps its ID)
+        t.update(info["fid"], **cols, status=tdb.CATALOGUED, bucket=None, rule=None, dest_path=None,
+                 companion_of=None, last_seen_run=run_id)
+        t.action(run_id, t.get(info["fid"]), "re-read", from_path=info["current_path"],
+                 detail="changed on disk since last read")
+    else:
+        names = ["source", "parent_id", "rel_path", "logical_path", "dir", "origin", "current_path",
+                 *READ_FIELDS, "status", "first_seen_run", "last_seen_run", "updated_at"]
+        vals = [info["source"], info["parent_id"], info["rel_path"], info["logical_path"], info["dir"],
+                info["origin"], info["current_path"], *cols.values(), tdb.CATALOGUED, run_id, run_id, now]
+        t.db.execute(f"INSERT INTO files ({', '.join(names)}) VALUES ({', '.join('?' * len(names))})", vals)
+    if r["catalogue_error"]:
+        log.info("read problem: %s: %s", info["current_path"], r["catalogue_error"])
 
 
 def read_items(t: tdb.TriageDB, pool, items: list[tuple], meta_of: dict, run_id: int, progress: Progress,
@@ -153,10 +167,10 @@ def read_items(t: tdb.TriageDB, pool, items: list[tuple], meta_of: dict, run_id:
         pending.append(r)
         progress.update(1, r["size"], extra=f"{errors:,} problems")
         if len(pending) >= batch_size:
-            _write_rows(t, pending, meta_of, run_id)
+            errors += _write_rows(t, pending, meta_of, run_id)
             pending.clear()
     if pending:
-        _write_rows(t, pending, meta_of, run_id)
+        errors += _write_rows(t, pending, meta_of, run_id)
     return errors
 
 
@@ -181,13 +195,15 @@ def run_scan(cfg: Config, source: Source) -> dict:
             for row in walk(source, p, errs):
                 batch.append(row)
                 if len(batch) >= 5000:
-                    db.executemany("INSERT OR REPLACE INTO temp.scan VALUES (?, ?, ?)", batch)
+                    _insert_scan(db, batch, errs)
                     batch.clear()
             if batch:
-                db.executemany("INSERT OR REPLACE INTO temp.scan VALUES (?, ?, ?)", batch)
+                _insert_scan(db, batch, errs)
             scanned, scanned_bytes = p.count, p.bytes
         for e in errs:
             log.warning("scan problem: %s", e)
+        if errs:
+            say(f"{len(errs):,} files or folders could not be listed (see the log) - the rest carry on.")
         summary.update(scanned=scanned, scanned_bytes=scanned_bytes, scan_errors=len(errs))
 
         waiting = db.execute(
@@ -253,7 +269,7 @@ def run_scan(cfg: Config, source: Source) -> dict:
                             "logical_path": rel, "dir": os.path.dirname(rel), "origin": abs_path,
                             "current_path": abs_path,
                         }
-                        items.append((rel, abs_path, os.path.basename(rel), r["size"], r["mtime"]))
+                        items.append((rel, to_fs(abs_path), os.path.basename(rel), r["size"], r["mtime"]))
                     errors += read_items(t, pool, items, meta_of, run_id, p)
                 pool.close()
             except KeyboardInterrupt:

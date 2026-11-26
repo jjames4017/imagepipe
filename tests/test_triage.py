@@ -391,3 +391,80 @@ def test_limit_and_recovery(env):
     r = {x["id"]: x for x in rows(cfg).values()}
     assert r[row["id"]]["status"] == "done"
     assert not os.path.exists(row["current_path"]) and dest.is_file()
+
+
+# ---------------------------------------------------------------- odd names and failures
+def test_names_that_are_not_utf8(env):
+    cfg, vault = env
+    folder = os.path.join(os.fsencode(vault / "photos"), b"caf\xe9 trip")
+    os.makedirs(folder)
+    with open(os.path.join(folder, b"IMG_0042.jpg"), "wb") as fh:
+        fh.write(jpeg(color=(4, 4, 4)))
+    with open(os.path.join(os.fsencode(vault / "file cabinet"), b"r\xe9sum\xe9.pdf"), "wb") as fh:
+        fh.write(b"%PDF-1.4\n" + b"2" * 80)
+
+    scan_all(cfg)
+    run_plan(cfg)
+    result = run_apply(cfg)
+    assert result["status"] == "finished" and result["stats"].get("errors", 0) == 0, result
+
+    r = rows(cfg)
+    photo = next(v for k, v in r.items() if k.endswith("IMG_0042.jpg"))
+    assert photo["status"] == "done"
+    # the original folder name's bytes are kept in the destination; the new file name is clean UTF-8
+    dest_dir = os.path.join(os.fsencode(vault / "imagepipe" / "photos"), b"caf\xe9 trip")
+    moved = os.listdir(dest_dir)
+    assert len(moved) == 1 and moved[0].endswith(b"_caf-trip.jpg"), moved
+    moved[0].decode("utf-8")  # valid UTF-8
+    pdf = next(v for k, v in r.items() if k.endswith(".pdf") and "sum" in k)
+    assert pdf["status"] == "done" and os.path.exists(os.fsencode(pdf["current_path"].replace("", "\udce9")))
+
+
+def test_one_bad_file_does_not_stop_scan(env, monkeypatch):
+    import imagepipe.triage.scan as scan_mod
+
+    cfg, vault = env
+    real = scan_mod._write_row
+
+    def flaky(t, r, info, run_id):
+        if info["rel_path"].endswith("song.mp3"):
+            raise RuntimeError("simulated failure")
+        return real(t, r, info, run_id)
+
+    monkeypatch.setattr(scan_mod, "_write_row", flaky)
+    res = run_scan(cfg, cfg.triage.source("photos"))
+    assert res["status"] == "finished" and res["read_problems"] >= 1
+    r = rows(cfg)
+    assert "photos:misc/song.mp3" not in r and "photos:misc/clip.mp4" in r
+
+
+def test_one_bad_move_or_archive_does_not_stop_apply(env, monkeypatch):
+    import imagepipe.triage.apply as apply_mod
+
+    cfg, vault = env
+    scan_all(cfg)
+    run_plan(cfg)
+    real_transfer, real_extract = apply_mod.transfer, apply_mod.extract
+
+    def bad_transfer(src, dest, sha, verify):
+        if src.endswith("notes.txt"):
+            raise RuntimeError("simulated move failure")
+        return real_transfer(src, dest, sha, verify)
+
+    def bad_extract(path, mime, dest, max_bytes, progress=None):
+        if path.endswith("Fiji 2010.zip"):
+            raise RuntimeError("simulated extraction crash")
+        return real_extract(path, mime, dest, max_bytes, progress)
+
+    monkeypatch.setattr(apply_mod, "transfer", bad_transfer)
+    monkeypatch.setattr(apply_mod, "extract", bad_extract)
+    result = run_apply(cfg)
+    assert result["status"] == "finished"
+    r = rows(cfg)
+    assert r["file-cabinet:letters/notes.txt"]["status"] == "error"
+    assert (vault / "file cabinet" / "letters" / "notes.txt").exists()
+    fiji = r["file-cabinet:Holidays/Fiji 2010.zip"]
+    assert fiji["status"] == "error" and (vault / "file cabinet" / "Holidays" / "Fiji 2010.zip").exists()
+    assert r["file-cabinet:letters/letter.docx"]["status"] == "done"
+    assert r["photos:2014/Bali/IMG_1234.jpg"]["status"] == "done"
+    assert not any((vault / "triage-work").glob("*/*"))

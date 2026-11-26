@@ -32,6 +32,7 @@ from pathlib import Path
 
 from imagepipe import exiftool as exiftool_mod
 from imagepipe.config import Config
+from imagepipe.fspath import to_db, to_fs
 from imagepipe.progress import Progress
 from imagepipe.triage import db as tdb
 from imagepipe.triage.archives import ArchiveError, NoSpace, extract
@@ -152,7 +153,7 @@ class Applier:
     def recover(self) -> None:
         rows = self.t.db.execute(f"SELECT * FROM files WHERE status='{tdb.MOVING}'").fetchall()
         for row in rows:
-            src, dest = row["current_path"], row["dest_path"]
+            src, dest = to_fs(row["current_path"]), to_fs(row["dest_path"])
             partial = dest + ".triage-partial" if dest else None
             if partial and os.path.lexists(partial):
                 os.unlink(partial)
@@ -180,6 +181,7 @@ class Applier:
 
     def _done(self, row, dest: str, method: str) -> None:
         embed = "pending" if row["kind"] in self.tc.embed_metadata and row["companion_of"] is None else "n/a"
+        dest = to_db(dest)
         self.t.update(row["id"], status=tdb.DONE, current_path=dest, dest_path=dest, done_at=self.t.now(),
                       embed_status=embed)
         self.t.action(self.run_id, row, "moved", row["current_path"], dest, row["rule"],
@@ -188,7 +190,7 @@ class Applier:
 
     # -- moving ----------------------------------------------------------------
     def move_one(self, row) -> bool:
-        src = row["current_path"]
+        src = to_fs(row["current_path"])
         try:
             st = os.lstat(src)
         except FileNotFoundError:
@@ -207,15 +209,23 @@ class Applier:
                           detail="changed since it was scanned - scan again, then plan")
             self.bump("changed")
             return False
-        dest = free_name(Path(row["dest_path"]))
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        self.t.update(row["id"], status=tdb.MOVING, dest_path=str(dest))
+        dest = free_name(Path(to_fs(row["dest_path"])))
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.t.update(row["id"], status=tdb.ERROR)
+            self.t.action(self.run_id, row, "error", row["current_path"], to_db(str(dest)), row["rule"],
+                          detail=f"could not create the destination folder: {exc}"[:500])
+            self.bump("errors")
+            return False
+        self.t.update(row["id"], status=tdb.MOVING, dest_path=to_db(str(dest)))
         self.t.db.commit()
         try:
             method = transfer(src, dest, row["sha256"], self.tc.verify)
-        except (MoveError, OSError) as exc:
+        except Exception as exc:
             self.t.update(row["id"], status=tdb.ERROR)
-            self.t.action(self.run_id, row, "error", src, str(dest), row["rule"], detail=str(exc)[:500])
+            self.t.action(self.run_id, row, "error", row["current_path"], to_db(str(dest)), row["rule"],
+                          detail=str(exc)[:500])
             self.bump("errors")
             log.warning("move failed: %s: %s", src, exc)
             return False
@@ -237,7 +247,17 @@ class Applier:
                 if not page:
                     break
                 for row in page:
-                    self.move_one(row)
+                    try:
+                        self.move_one(row)
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as exc:  # one file never stops the run
+                        self.t.db.rollback()
+                        self.t.update(row["id"], status=tdb.ERROR)
+                        self.t.action(self.run_id, row, "error", row["current_path"], row["dest_path"], row["rule"],
+                                      detail=f"{type(exc).__name__}: {exc}"[:500])
+                        self.bump("errors")
+                        log.exception("move failed: %s", row["current_path"])
                     done += 1
                     p.update(1, extra=f"{self.stats.get('errors', 0):,} errors")
                 self.t.db.commit()
@@ -253,7 +273,7 @@ class Applier:
         self.move_one(self.t.get(row["id"]))
 
     def handle_archive(self, row, pool) -> None:
-        src = row["current_path"]
+        src = to_fs(row["current_path"])
         name = os.path.basename(row["logical_path"])
         if row["source"] not in self.folder_of:
             return
@@ -296,18 +316,19 @@ class Applier:
         base_logical = "/".join(x for x in (row["dir"], archive_stem(name)) if x)
         items, meta_of = [], {}
         for f in files:
-            logical = f"{base_logical}/{f.name}"
-            key = f"{row['id']}:{f.name}"
+            name = to_db(f.name)
+            logical = f"{base_logical}/{name}"
+            key = f"{row['id']}:{name}"
             meta_of[key] = {
-                "fid": None, "source": row["source"], "parent_id": row["id"], "rel_path": f.name,
-                "logical_path": logical, "dir": os.path.dirname(logical), "origin": f"{row['origin']}::{f.name}",
-                "current_path": str(f.path),
+                "fid": None, "source": row["source"], "parent_id": row["id"], "rel_path": name,
+                "logical_path": logical, "dir": os.path.dirname(logical), "origin": f"{row['origin']}::{name}",
+                "current_path": to_db(str(f.path)),
             }
-            items.append((key, str(f.path), os.path.basename(f.name), f.size, f.mtime))
+            items.append((key, str(f.path), os.path.basename(name), f.size, f.mtime))
         with Progress(f"Read {len(files):,} extracted", total=len(files), total_bytes=sum(f.size for f in files)) as p:
             read_items(self.t, pool, items, meta_of, self.run_id, p)
         # the files were read back from disk: their checksums must match those taken while extracting
-        sha_of = {f.name: f.sha256 for f in files}
+        sha_of = {to_db(f.name): f.sha256 for f in files}
         kids = self.t.db.execute("SELECT * FROM files WHERE parent_id=?", (row["id"],)).fetchall()
         bad = [k["rel_path"] for k in kids if k["sha256"] != sha_of.get(k["rel_path"])]
         if bad or len(kids) != len(files):
@@ -320,12 +341,13 @@ class Applier:
         self.t.db.executemany("INSERT INTO archive_members (archive_id, name, size, file_id) VALUES (?, ?, ?, ?)",
                               [(row["id"], k["rel_path"], k["size"], k["id"]) for k in kids])
         for k in kids:
-            self.t.action(self.run_id, k, "extracted", f"{src}::{k['rel_path']}", k["current_path"],
+            self.t.action(self.run_id, k, "extracted", f"{row['current_path']}::{k['rel_path']}", k["current_path"],
                           sha_after=k["sha256"], detail=f"from archive {row['triage_id']}")
         self.t.db.commit()
         os.unlink(src)
         self.t.update(row["id"], status=tdb.EXTRACTED, done_at=self.t.now())
-        self.t.action(self.run_id, row, "archive-deleted", src, None, row["rule"], sha_before=row["sha256"],
+        self.t.action(self.run_id, row, "archive-deleted", row["current_path"], None, row["rule"],
+                      sha_before=row["sha256"],
                       detail=f"all {len(kids):,} files extracted and verified")
         self.t.db.commit()
         self.bump("archives-extracted")
@@ -358,7 +380,7 @@ class Applier:
                         break
                     last = page[-1]["id"]
                     by_id = {r["id"]: r for r in page}
-                    items = [(r["id"], r["current_path"], r["triage_id"], r["origin"]) for r in page]
+                    items = [(r["id"], to_fs(r["current_path"]), r["triage_id"], to_fs(r["origin"])) for r in page]
                     for fid, ok, msg, sha in pool.imap_unordered(_embed_one, items, chunksize=8):
                         row = by_id[fid]
                         if ok:
@@ -448,7 +470,22 @@ def run_apply(cfg: Config, limit: int | None = None) -> dict:
                 if pool is None:
                     pool = make_pool(tc.workers, exiftool_ok())
                 for row in archives:
-                    a.handle_archive(row, pool)
+                    try:
+                        a.handle_archive(row, pool)
+                    except (KeyboardInterrupt, TriageAbort):
+                        raise
+                    except Exception as exc:  # one archive never stops the run; it is left where it was
+                        t.db.rollback()
+                        work = tc.work_dir / (row["triage_id"] or "none")
+                        t.db.execute("DELETE FROM files WHERE parent_id=? AND status=?", (row["id"], tdb.CATALOGUED))
+                        if work.exists():
+                            shutil.rmtree(work)
+                        t.update(row["id"], status=tdb.ERROR)
+                        t.action(run_id, row, "error", row["current_path"], None, row["rule"],
+                                 detail=f"archive: {type(exc).__name__}: {exc}"[:500])
+                        t.db.commit()
+                        a.bump("errors")
+                        log.exception("archive failed: %s", row["current_path"])
                     if remaining is not None:
                         remaining -= 1
                         if remaining <= 0:

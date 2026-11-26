@@ -29,6 +29,7 @@ import multiprocessing
 from imagepipe import exiftool as exiftool_mod
 from imagepipe.config import Config, Source
 from imagepipe.detect import HEAD_BYTES, detect, extension
+from imagepipe.fspath import to_db, to_fs
 from imagepipe.manifest import Manifest
 from imagepipe.metadata import HEIF, exiftool_info, image_info, zip_members
 from imagepipe.progress import Progress, fmt_bytes
@@ -82,7 +83,19 @@ def scan(source: Source, progress: Progress, errors: list[str]):
                     errors.append(f"{entry.path}: {exc.strerror or exc}")
                     continue
                 progress.update(1, st.st_size, extra=f"{dirs:,} folders")
-                yield rel, st.st_size, st.st_mtime
+                yield to_db(rel), st.st_size, st.st_mtime
+
+
+def _insert_scan(db, batch: list, errors: list[str]) -> None:
+    """Add scanned files to the temp table; a row that can't be stored is reported, not fatal."""
+    try:
+        db.executemany("INSERT OR REPLACE INTO temp.scan VALUES (?, ?, ?)", batch)
+    except Exception:
+        for row in batch:
+            try:
+                db.execute("INSERT OR REPLACE INTO temp.scan VALUES (?, ?, ?)", row)
+            except Exception as exc:
+                errors.append(f"{row[0]!r}: {exc}")
 
 
 # ---------------------------------------------------------------- workers
@@ -194,10 +207,10 @@ def run_catalogue(cfg: Config, source_name: str, retry_errors: bool = False) -> 
             for row in scan(source, p, scan_errors):
                 batch.append(row)
                 if len(batch) >= 5000:
-                    db.executemany("INSERT OR REPLACE INTO temp.scan VALUES (?, ?, ?)", batch)
+                    _insert_scan(db, batch, scan_errors)
                     batch.clear()
             if batch:
-                db.executemany("INSERT OR REPLACE INTO temp.scan VALUES (?, ?, ?)", batch)
+                _insert_scan(db, batch, scan_errors)
             scanned = p.count
             scanned_bytes = p.bytes
         for err in scan_errors:
@@ -268,11 +281,26 @@ def run_catalogue(cfg: Config, source_name: str, retry_errors: bool = False) -> 
         def file_id(rel: str) -> int:
             return db.execute("SELECT id FROM files WHERE source=? AND rel_path=?", (source.name, rel)).fetchone()[0]
 
+        failed_rows: list[str] = []
+
         def flush() -> None:
             now = m.now()
             for r in pending:
                 r.update(source=source.name, run=run_id, now=now)
-            db.executemany(UPSERT, pending)
+            try:
+                db.executemany(UPSERT, pending)
+            except Exception:
+                # one bad row must not lose the batch or stop the run: write them one at a time
+                db.rollback()
+                good = []
+                for r in pending:
+                    try:
+                        db.execute(UPSERT, r)
+                        good.append(r)
+                    except Exception as exc:
+                        failed_rows.append(r["rel_path"])
+                        log.error("could not record %s: %s", r["rel_path"], exc)
+                pending[:] = good
             for r in pending:
                 if r["fid"] is not None:
                     m.event(run_id, r["fid"], STAGE, "changed", r["rel_path"])
@@ -303,7 +331,7 @@ def run_catalogue(cfg: Config, source_name: str, retry_errors: bool = False) -> 
                     if not page:
                         break
                     last_rowid = page[-1]["rowid"]
-                    items = [(os.path.join(root, r["rel_path"]), r["rel_path"], r["size"], r["mtime"], r["fid"])
+                    items = [(to_fs(os.path.join(root, r["rel_path"])), r["rel_path"], r["size"], r["mtime"], r["fid"])
                              for r in page]
                     for r in pool.imap_unordered(read_file, items, chunksize=8):
                         kinds[r["kind"]] = kinds.get(r["kind"], 0) + 1
@@ -321,7 +349,7 @@ def run_catalogue(cfg: Config, source_name: str, retry_errors: bool = False) -> 
                 pool.join()
                 if pending:
                     flush()
-            summary.update(read=p.count, read_errors=read_errors, kinds=kinds)
+            summary.update(read=p.count, read_errors=read_errors + len(failed_rows), kinds=kinds)
 
         status = "interrupted" if interrupted else "finished"
         if interrupted:
