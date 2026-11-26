@@ -787,3 +787,17 @@ def test_damaged_exif_is_counted_not_printed(env, capfd):
     assert "Corrupt EXIF" not in err
     r = rows(cfg)["file-cabinet:pics/bad.jpg"]
     assert r["catalogue_error"] is None and r["kind"] == "image"
+
+
+# ------------------------------------------------- #15 geocoder message
+def test_geocoder_message_is_imagepipes_own(capfd):
+    from imagepipe.triage.naming import Geocoder
+
+    g = Geocoder(True)
+    if not g.available:
+        pytest.skip("reverse_geocoder not installed")
+    g.places([(-8.65, 115.13)])
+    g.places([(15.88, 108.33)])
+    out = capfd.readouterr()
+    assert "Loading formatted geocoded file" not in out.out + out.err
+    assert out.err.count("Loading place names (offline)... done") == 1

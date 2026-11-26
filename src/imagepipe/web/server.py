@@ -30,6 +30,7 @@ import yaml
 
 from imagepipe import __version__
 from imagepipe.config import ConfigError, load_config
+from imagepipe.progress import parse_line
 from imagepipe.web.schema import SCHEMA
 
 # Commands the UI may run: id -> (label, argv builder from options)
@@ -70,6 +71,7 @@ def build_argv(job: str, opts: dict) -> list[str]:
     raise ValueError(f"Unknown job '{job}'")
 
 
+
 ACTIVE = ("running", "paused", "stopping")  # a job in any of these blocks starting another
 
 class JobRunner:
@@ -93,7 +95,9 @@ class JobRunner:
             return {
                 "job": {k: job[k] for k in ("id", "kind", "label", "argv", "status", "started", "finished",
                                             "returncode")}
-                | {"progress": list(job["progress"].values()), "lines": lines, "line_count": len(job["lines"])},
+                | {"progress": list(job["progress"].values()),
+                   "progress_rows": [r for r in map(parse_line, job["progress"].values()) if r],
+                   "lines": lines, "line_count": len(job["lines"])},
                 "history": list(self.history),
             }
 

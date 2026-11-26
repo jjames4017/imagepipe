@@ -384,6 +384,8 @@ def plan_rows(cfg: Config, t: tdb.TriageDB, where: str = "", params: tuple = (),
                 rows = t.db.execute(
                     f"SELECT * FROM files WHERE {base} AND source=? AND parent_id=? AND dir=? ORDER BY rel_path",
                     (*params, g["source"], g["parent_id"], g["dir"])).fetchall()
+                if progress is not None:
+                    progress.set_extra(f"folder: {g['dir'] or '(top)'}")
                 t.db.execute("SAVEPOINT plan_folder")
                 try:
                     for k, v in planner.plan_group(rows, folder_of[g["source"]], progress).items():

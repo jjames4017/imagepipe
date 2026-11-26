@@ -11,6 +11,7 @@ from __future__ import annotations
 import collections
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -168,3 +169,39 @@ class Progress:
         if final or now - self._last_log >= 60:
             self._last_log = now
             log.info(text)
+
+
+COLUMNS = ("phase", "done", "pct", "rate", "data", "elapsed", "eta", "detail")
+_DONE_RE = re.compile(r"^([\d,]+(?:/[\d,]+)? \S+?)(?: \(\s*([\d.]+%)\))?$")
+
+
+def parse_line(line: str) -> dict[str, str] | None:
+    """Split a progress line into labelled columns (for the web UI). None if it isn't one.
+
+    "[Plan] | 117,656/252,593 files ( 46.6%) | 64 files/s | elapsed 00:30:32 | ETA 00:35:01 | folder: x"
+    -> phase=Plan, done=117,656/252,593 files, pct=46.6%, rate=64 files/s, elapsed=00:30:32,
+       eta=00:35:01, detail=folder: x
+    """
+    if not line.startswith("[") or "]" not in line:
+        return None
+    parts = line.split(" | ")
+    out = dict.fromkeys(COLUMNS, "")
+    out["phase"] = parts[0].strip()[1:].split("]", 1)[0]
+    detail = []
+    for part in parts[1:]:
+        part = part.strip()
+        m = _DONE_RE.match(part)
+        if not out["done"] and m:
+            out["done"], out["pct"] = m.group(1), m.group(2) or ""
+        elif not out["rate"] and part.endswith("/s") and " @ " not in part:
+            out["rate"] = part
+        elif not out["data"] and " @ " in part:
+            out["data"] = part
+        elif part.startswith("elapsed "):
+            out["elapsed"] = part[8:]
+        elif part.startswith("ETA "):
+            out["eta"] = part[4:]
+        elif part:
+            detail.append(part)
+    out["detail"] = " | ".join(detail)
+    return out

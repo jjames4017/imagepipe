@@ -97,3 +97,35 @@ def test_paused_time_is_not_elapsed(tmp_path):
     os.kill(proc.pid, signal.SIGCONT)
     out, _ = proc.communicate(timeout=30)
     assert 5 <= int(out.strip()) <= 7, out
+
+
+def test_parse_line_into_columns():
+    from imagepipe.progress import parse_line
+
+    r = parse_line("[Plan] | 117,656/252,593 files ( 46.6%) | 64 files/s | elapsed 00:30:32 | ETA 00:35:01 "
+                   "| folder: drive_backup/Letters")
+    assert r == {"phase": "Plan", "done": "117,656/252,593 files", "pct": "46.6%", "rate": "64 files/s",
+                 "data": "", "elapsed": "00:30:32", "eta": "00:35:01", "detail": "folder: drive_backup/Letters"}
+    r = parse_line("[1/3 Scan] | 252,593 files | 1,859 files/s | 380.3 GB @ 2.8 GB/s | elapsed 00:02:15 "
+                   "| 12,287 folders")
+    assert (r["phase"], r["done"], r["pct"], r["data"], r["eta"], r["detail"]) == (
+        "1/3 Scan", "252,593 files", "", "380.3 GB @ 2.8 GB/s", "", "12,287 folders")
+    r = parse_line("[3/3 Read] | 31/31 files (100.0%) | 23 files/s | 665.0 MB/665.0 MB @ 484.3 MB/s "
+                   "| elapsed 00:00:01 | ETA 00:00:00 | 3 problems")
+    assert (r["pct"], r["data"], r["detail"]) == ("100.0%", "665.0 MB/665.0 MB @ 484.3 MB/s", "3 problems")
+    r = parse_line("[Move] | 5/10 files ( 50.0%) | 1 files/s | elapsed 00:00:05 | ETA 00:00:05 "
+                   "| 0 errors | moving IMG_1.jpg")
+    assert r["detail"] == "0 errors | moving IMG_1.jpg"
+    assert parse_line("Loading place names (offline)...") is None
+
+
+def test_progress_line_round_trips(monkeypatch):
+    from imagepipe.progress import parse_line
+
+    p, clock = make(monkeypatch, total=100, total_bytes=2048)
+    clock.t += 4
+    p.update(10, 512, extra="folder: a/b")
+    r = parse_line(p.line())
+    assert r["phase"] == "Plan" and r["done"] == "10/100 files" and r["pct"] == "10.0%"
+    assert r["rate"] == "2 files/s" and "@" in r["data"] and r["detail"] == "folder: a/b" and r["eta"]
+    p.close()
