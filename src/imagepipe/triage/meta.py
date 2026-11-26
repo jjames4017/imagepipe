@@ -60,9 +60,15 @@ def useful_title(value) -> str | None:
         return None
     value = re.sub(r"^microsoft (word|excel|powerpoint) - ", "", value, flags=re.I).strip()
     value = re.sub(r"\.(docx?|xlsx?|pptx?|pdf|odt|rtf|txt)$", "", value, flags=re.I).strip()
-    if len(value) < 3 or value.lower() in GENERIC_TITLES or not re.search(r"[^\W\d_]{2}", value):
+    if len(value) < 3 or is_generic_title(value) or not re.search(r"[^\W\d_]{2}", value):
         return None
     return value[:200]
+
+
+def is_generic_title(value: str) -> bool:
+    """'Untitled', 'Track 23', 'Chapter 4' ... say nothing about the file (#32)."""
+    v = value.strip().lower()
+    return v in GENERIC_TITLES or bool(re.fullmatch(r"(audio |unknown )?(track|chapter|title|song|clip)[\s_#-]*\d*", v))
 
 
 def _rational(v) -> float:
