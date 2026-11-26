@@ -33,7 +33,8 @@ imagepipe layered render <file> [<file> ...] [--out <folder>]
 
 Makes a full-resolution working copy of each file - JPEG, or PNG when it has
 transparency; CMYK and 16-bit are converted to normal 8-bit RGB - in
-`<reports_dir>/layered/renders` (or `--out`). The original is not touched.
+`<reports_dir>/layered/renders` (or `--out`). The original is not touched. Renders
+in the default folder show in the Web UI: Reports tab -> `layered/renders/...` -> click to view.
 
 - **PSD/PSB**: the merged image Photoshop stores (when saved with "Maximize
   compatibility", the default), or else a composite of the layers made by
