@@ -189,3 +189,26 @@ def test_pause_resume_and_stop_a_job(web, monkeypatch):
     assert s["job"]["status"] == "interrupted", s["job"]
     lines = s["job"]["lines"]
     assert any("paused at" in x for x in lines) and any("resumed at" in x for x in lines)
+
+
+def test_reports_show_render_images(web):
+    import io as _io
+    import urllib.request
+
+    from PIL import Image
+
+    base, cfg, vault, app = web
+    renders = cfg.reports_dir / "layered" / "renders"
+    renders.mkdir(parents=True, exist_ok=True)
+    buf = _io.BytesIO()
+    Image.new("RGB", (8, 6), (200, 10, 10)).save(buf, "JPEG")
+    (renders / "Māori poster.jpg").write_bytes(buf.getvalue())
+    listed = {f["name"]: f for f in get(base, "/api/reports")}
+    row = listed[str(Path("layered") / "renders" / "Māori poster.jpg")]
+    assert row["image"] is True
+    from urllib.parse import quote as _q
+
+    with urllib.request.urlopen(base + "/api/file?path=" + _q(row["path"])) as r:
+        assert r.headers["Content-Type"] == "image/jpeg" and r.read() == buf.getvalue()
+    with urllib.request.urlopen(base + "/api/file?download=1&path=" + _q(row["path"])) as r:
+        assert "attachment" in r.headers["Content-Disposition"] and "UTF-8''M%C4%81ori" in r.headers["Content-Disposition"]

@@ -24,7 +24,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 import yaml
 
@@ -78,6 +78,9 @@ def build_argv(job: str, opts: dict) -> list[str]:
     raise ValueError(f"Unknown job '{job}'")
 
 
+
+REPORT_SUFFIXES = (".md", ".csv", ".log", ".txt")
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png")  # working copies from `imagepipe layered render`
 
 ACTIVE = ("running", "paused", "stopping")  # a job in any of these blocks starting another
 
@@ -372,11 +375,12 @@ class App:
             if not root.is_dir():
                 continue
             for p in root.rglob("*"):
-                if p.is_file() and p.suffix in (".md", ".csv", ".log", ".txt"):
+                if p.is_file() and p.suffix.lower() in REPORT_SUFFIXES + IMAGE_SUFFIXES:
                     st = p.stat()
                     files.append({"path": str(p), "name": str(p.relative_to(root)), "root": str(root),
                                   "size": st.st_size, "mtime": st.st_mtime,
-                                  "protected": p.name in self.PROTECTED_NAMES})
+                                  "protected": p.name in self.PROTECTED_NAMES,
+                                  "image": p.suffix.lower() in IMAGE_SUFFIXES})
         files.sort(key=lambda f: f["mtime"], reverse=True)
         return files if limit is None else files[:limit]
 
@@ -486,9 +490,13 @@ def make_handler(app: App):
                     body = p.read_bytes()
                     self.send_response(HTTPStatus.OK)
                     ctype = "text/plain; charset=utf-8"
+                    if p.suffix.lower() in IMAGE_SUFFIXES:  # renders: shown in the browser (#53)
+                        ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
                     if q.get("download"):
                         ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
-                        self.send_header("Content-Disposition", f'attachment; filename="{p.name}"')
+                        ascii_name = p.name.encode("ascii", "replace").decode().replace('"', "_")
+                        self.send_header("Content-Disposition", f'attachment; filename="{ascii_name}"; '
+                                                                f"filename*=UTF-8''{quote(p.name)}")
                     self.send_header("Content-Type", ctype)
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()

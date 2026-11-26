@@ -180,7 +180,8 @@
       <div class="scroll" style="max-height:300px"><table><thead><tr><th>File</th><th>Folder</th><th>Size</th><th>Changed</th><th></th></tr></thead>
         <tbody id="r-rows"></tbody></table></div>
     </div>
-    <div class="card"><h2 id="r-title">Select a report</h2><pre id="r-view" style="max-height:600px"></pre></div>
+    <div class="card"><h2 id="r-title">Select a report</h2><pre id="r-view" style="max-height:600px"></pre>
+      <img id="r-img" alt="" style="max-width:100%; display:none; border:1px solid var(--line)"></div>
   </section>
 
   <!-- SETTINGS -->
@@ -364,7 +365,12 @@ async function loadReports() {
     "Delete " + b.dataset.del + "?"));
   $$("[data-view]").forEach(a => a.onclick = async e => { e.preventDefault();
     const p = a.dataset.view; $("#r-title").textContent = p;
-    const r = await fetch("/api/file?path=" + encodeURIComponent(p)); const t = await r.text();
+    const url = "/api/file?path=" + encodeURIComponent(p);
+    if (/\.(jpe?g|png)$/i.test(p)) {  // a working copy: show the picture
+      $("#r-view").style.display = "none"; $("#r-img").style.display = ""; $("#r-img").src = url; return;
+    }
+    $("#r-img").style.display = "none"; $("#r-img").removeAttribute("src"); $("#r-view").style.display = "";
+    const r = await fetch(url); const t = await r.text();
     $("#r-view").textContent = t.length > 2_000_000 ? t.slice(0, 2_000_000) + "\n\n... (truncated - use download)" : t; });
 }
 $("#r-refresh").onclick = loadReports;
