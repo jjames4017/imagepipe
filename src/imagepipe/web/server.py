@@ -58,6 +58,13 @@ def build_argv(job: str, opts: dict) -> list[str]:
     if job == "triage-scan":
         reread = str(opts.get("reread") or "").strip()
         flag = {"problems": ["--reread-problems"], "all": ["--reread-all"]}.get(reread, [])
+        if reread == "ext":
+            from imagepipe.triage.scan import parse_exts
+
+            exts = parse_exts(str(opts.get("reread_ext") or ""))
+            if not exts:
+                raise ValueError("Type the file types to re-read, e.g. eml")
+            flag = ["--reread-ext", ",".join(exts)]
         return ["triage", "scan"] + (["--source", src] if src else []) + flag
     if job == "triage-plan":
         return ["triage", "plan"]

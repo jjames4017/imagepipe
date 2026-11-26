@@ -29,7 +29,7 @@ folder named after the source:
 
 | Command | What it does | Changes files? |
 |---|---|---|
-| `imagepipe triage scan [--source NAME] [--reread-problems \| --reread-all]` | Inventory: real type, SHA-256, dates, GPS, titles | No |
+| `imagepipe triage scan [--source NAME] [--reread-problems \| --reread-ext TYPES \| --reread-all]` | Inventory: real type, SHA-256, dates, GPS, titles | No |
 | `imagepipe triage plan` | Decides every destination and name; writes a dry-run report | No |
 | `imagepipe triage apply [--limit N]` | Carries out the plan | **Yes - moves files** |
 | `imagepipe triage status` | Counts by status and bucket, recent runs | No |
@@ -57,14 +57,18 @@ a version that reads some files better, read them again:
 
 - `--reread-problems` - also read again every file that had a read problem
   last time. Quick: only those files are read.
+- `--reread-ext TYPES` - also read again every file of these types, e.g.
+  `--reread-ext eml` or `--reread-ext eml,msg`. Use it when a new version reads
+  one kind of file better.
 - `--reread-all` - read every file in the source again, ignoring the unchanged
   check. Takes as long as the first scan.
 
-The two can't be used together. Only files still in the source (not yet moved
+Only one of these can be used at a time. Only files still in the source (not yet moved
 by apply) are read. Files keep their pipeline ID; each one gets a `re-read`
 action saying why, and goes back to catalogued, so run `triage plan` again
-afterwards. In the web UI: Run tab -> Triage card -> **Scan reads** -> choose,
-then **Scan**.
+afterwards. In the web UI: Run tab -> Triage card -> **Scan reads** -> choose (for
+**+ re-read file types:** type them in the box beside it, e.g. `eml`), then
+**Scan**.
 
 ## New names
 
@@ -77,7 +81,8 @@ front of a file name is kept.
 
 **Date**, from the first of:
 
-1. metadata inside the file: EXIF (photos), creation date (video, PDF, Word/Excel/PowerPoint/OpenDocument)
+1. metadata inside the file: EXIF (photos), creation date (video, PDF, Word/Excel/PowerPoint/OpenDocument),
+   the `Date:` header of `.eml` emails (in the configured time zone)
 2. a sidecar or metadata file: Google Takeout JSON, XMP sidecar
 3. a date in the file name, then in the folder names (deepest first) - full date,
    year-month or year; `2014/07/` folders combine to `2014-07`

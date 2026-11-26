@@ -470,7 +470,7 @@ def run_apply(cfg: Config, limit: int | None = None) -> dict:
                 if not archives:
                     break
                 if pool is None:
-                    pool = make_pool(tc.workers, exiftool_ok())
+                    pool = make_pool(tc.workers, exiftool_ok(), cfg.timezone)
                 for row in archives:
                     try:
                         a.handle_archive(row, pool)

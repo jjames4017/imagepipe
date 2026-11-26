@@ -30,7 +30,7 @@ from imagepipe.fspath import to_fs
 from imagepipe.metadata import HEIF
 from imagepipe.progress import Progress, fmt_bytes
 from imagepipe.triage import db as tdb
-from imagepipe.triage.meta import (exiftool_meta, image_meta, office_meta, ole_office_meta, psd_meta, takeout_meta,
+from imagepipe.triage.meta import (eml_meta, exiftool_meta, image_meta, office_meta, ole_office_meta, psd_meta, takeout_meta,
                                    xmp_sidecar_meta)
 
 PSD_MIME = "image/vnd.adobe.photoshop"
@@ -43,11 +43,12 @@ READ_FIELDS = ("size", "mtime", "ext", "kind", "mime", "ext_mismatch", "sha256",
                "meta_title", "takeout_title", "encrypted", "catalogue_error")
 
 
-REREAD_CHOICES = ("problems", "all")
+REREAD_CHOICES = ("problems", "all", "ext")
 REREAD_DETAIL = {
     "changed": "changed on disk since last read",
     "problem": "read again: had a read problem last time (--reread-problems)",
     "all": "read again: every file re-read (--reread-all)",
+    "ext": "read again: its file type was chosen (--reread-ext)",
 }
 
 
@@ -123,6 +124,8 @@ def read_entry(item: tuple) -> dict:
             elif mime == "application/vnd.openxmlformats":
                 meta = office_meta(abs_path)
             # RTF/HTML/text saved under an Office extension: a readable document, nothing more to read
+        elif ext == "eml" and kind in ("document", "unknown"):
+            meta = eml_meta(abs_path, _W.get("tz"))
         elif kind == "document" and ext == "json":
             meta = takeout_meta(abs_path, size)
         elif kind == "sidecar" and ext in ("xmp", "xmp_original"):
@@ -134,10 +137,10 @@ def read_entry(item: tuple) -> dict:
     return out
 
 
-def make_pool(workers: int, use_exiftool: bool):
+def make_pool(workers: int, use_exiftool: bool, tz: str | None = None):
     # spawn, not fork: the progress thread is running and fork() with threads can deadlock
     return multiprocessing.get_context("spawn").Pool(
-        workers, initializer=init_worker, initargs=({"use_exiftool": use_exiftool},))
+        workers, initializer=init_worker, initargs=({"use_exiftool": use_exiftool, "tz": tz},))
 
 
 def exiftool_ok() -> bool:
@@ -207,10 +210,19 @@ def read_items(t: tdb.TriageDB, pool, items: list[tuple], meta_of: dict, run_id:
     return errors
 
 
-def run_scan(cfg: Config, source: Source, reread: str | None = None) -> dict:
-    """Scan one source. reread: None (new/changed only), "problems" or "all"."""
+def parse_exts(text: str | None) -> list[str]:
+    """'eml, .MSG' -> ['eml', 'msg']"""
+    return sorted({e.strip().lstrip(".").lower() for e in (text or "").replace(";", ",").split(",") if e.strip()})
+
+
+def run_scan(cfg: Config, source: Source, reread: str | None = None, reread_ext: list[str] | None = None) -> dict:
+    """Scan one source. reread: None (new/changed only), "problems", "all" or "ext" (the
+    file types in reread_ext, e.g. ["eml"])."""
     if reread not in (None, *REREAD_CHOICES):
         raise ValueError(f"reread must be one of {REREAD_CHOICES} or None, not {reread!r}")
+    reread_ext = parse_exts(",".join(reread_ext or []))
+    if reread == "ext" and not reread_ext:
+        raise ValueError("--reread-ext needs at least one file type, e.g. eml")
     tc = cfg.triage
     if not source.path.is_dir():
         raise TriageAbort(f"Source folder not found or not a folder: {source.path}")
@@ -226,6 +238,8 @@ def run_scan(cfg: Config, source: Source, reread: str | None = None) -> dict:
             say("Re-reading files that had a read problem last time, as well as new and changed files.")
         elif reread == "all":
             say("Re-reading every file still in the source (the unchanged check is skipped).")
+        elif reread == "ext":
+            say(f"Re-reading every .{', .'.join(reread_ext)} file, as well as new and changed files.")
 
         db.execute("DROP TABLE IF EXISTS temp.scan")
         db.execute("CREATE TEMP TABLE scan (rel_path TEXT PRIMARY KEY, size INTEGER, mtime REAL)")
@@ -259,12 +273,16 @@ def run_scan(cfg: Config, source: Source, reread: str | None = None) -> dict:
         with Progress("2/3 Compare", unit="steps", total=2) as p:
             p.set_extra("finding new and changed files")
             db.execute("DROP TABLE IF EXISTS temp.todo")
+            db.execute("DROP TABLE IF EXISTS temp.reread_ext")
+            db.execute("CREATE TEMP TABLE reread_ext (e TEXT PRIMARY KEY)")
+            db.executemany("INSERT INTO temp.reread_ext VALUES (?)", [(e,) for e in reread_ext])
             db.execute(f"""
                 CREATE TEMP TABLE todo AS
                 SELECT s.rel_path, s.size, s.mtime, f.id AS fid, f.current_path AS current_path,
                        CASE WHEN f.id IS NULL THEN 'new'
                             WHEN f.size != s.size OR f.mtime != s.mtime
                                  OR f.status IN ('{tdb.MISSING}', '{tdb.CHANGED}') THEN 'changed'
+                            WHEN :reread = 'ext' THEN 'ext'
                             WHEN f.catalogue_error IS NOT NULL THEN 'problem'
                             ELSE 'all' END AS why
                 FROM temp.scan s
@@ -274,6 +292,7 @@ def run_scan(cfg: Config, source: Source, reread: str | None = None) -> dict:
                    OR f.status IN ('{tdb.MISSING}', '{tdb.CHANGED}')
                    OR (:reread = 'problems' AND f.catalogue_error IS NOT NULL)
                    OR :reread = 'all'
+                   OR (:reread = 'ext' AND lower(coalesce(f.ext, '')) IN (SELECT e FROM temp.reread_ext))
             """, {"src": source.name, "reread": reread or ""})
             p.update(1, extra="marking files that disappeared")
             gone = db.execute(f"""
@@ -291,7 +310,7 @@ def run_scan(cfg: Config, source: Source, reread: str | None = None) -> dict:
             p.update(1, extra="done")
         todo, todo_bytes = db.execute("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM temp.todo").fetchone()
         whys = dict(db.execute("SELECT why, COUNT(*) FROM temp.todo GROUP BY why").fetchall())
-        n_reread = whys.get("problem", 0) + whys.get("all", 0)
+        n_reread = whys.get("problem", 0) + whys.get("all", 0) + whys.get("ext", 0)
         summary.update(to_read=todo, to_read_bytes=todo_bytes, missing=len(gone), reread_files=n_reread)
         if reread:
             say(f"{todo:,} files to read ({fmt_bytes(todo_bytes)}): {whys.get('new', 0):,} new, "
@@ -307,7 +326,7 @@ def run_scan(cfg: Config, source: Source, reread: str | None = None) -> dict:
         counts: dict = {"exif_damaged": 0}
         interrupted = False
         with Progress("3/3 Read", total=todo, total_bytes=todo_bytes) as p:
-            pool = make_pool(tc.workers, use_et)
+            pool = make_pool(tc.workers, use_et, cfg.timezone)
             try:
                 last = 0
                 while True:

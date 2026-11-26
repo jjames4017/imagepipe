@@ -1015,3 +1015,53 @@ def test_repeated_words_dropped():
     assert drop_repeats("Flat-1-1") == "Flat-1-1"
     name, _ = smartname(None, None, ["Dansey", "Dansey"], "Some Dansey Birth dates")
     assert name == "Dansey-Some-Dansey-Birth-dates"
+
+
+# ------------------------------------------------- 0.3.11: #45
+EML = (b"From: Nanna <nanna@example.nz>\r\nTo: Tu <tu@example.nz>\r\n"
+       b"Date: Mon, 12 Mar 2001 21:05:09 +1300\r\nSubject: Nanna, Father & Mum\r\n\r\nHello\r\n")
+
+
+def test_eml_date_header(tmp_path):
+    from imagepipe.triage.meta import eml_meta
+
+    p = tmp_path / "x.eml"
+    p.write_bytes(EML)
+    assert eml_meta(str(p), "Australia/Brisbane") == {"meta_date": "2001-03-12 18:05:09", "meta_date_src": "email"}
+    assert eml_meta(str(p)) == {"meta_date": "2001-03-12 21:05:09", "meta_date_src": "email"}
+    p.write_bytes(b"From: a@b\r\nDate: not a date\r\n\r\nx")
+    assert eml_meta(str(p), "Australia/Brisbane") == {}
+    p.write_bytes(b"From: a@b\r\n\r\nDate: Mon, 12 Mar 2001 21:05:09 +1300\r\n")  # in the body: not a header
+    assert eml_meta(str(p), "Australia/Brisbane") == {}
+
+
+def test_reread_ext_and_email_dates(env):
+    from imagepipe.cli import build_parser
+    from imagepipe.web.server import build_argv
+
+    cfg, vault = env
+    src = cfg.triage.source("file-cabinet")
+    build(vault / "file cabinet", {"Old Documents/Nanna, Father & Mum.eml": EML})
+    assert run_scan(cfg, src)["status"] == "finished"
+    db = sqlite3.connect(cfg.triage.database)  # as if read by a version without the Date: reader
+    db.execute("UPDATE files SET meta_date=NULL, meta_date_src=NULL WHERE ext='eml'")
+    db.commit()
+    db.close()
+    assert run_scan(cfg, src)["to_read"] == 0
+    res = run_scan(cfg, src, reread="ext", reread_ext=["EML"])
+    assert res["to_read"] == res["reread_files"] == 1
+    assert run_plan(cfg)["status"] == "finished"
+    r = rows(cfg)["file-cabinet:Old Documents/Nanna, Father & Mum.eml"]
+    assert r["bucket"] == "sorted/email" and (r["name_date"], r["date_source"]) == ("2001-03-12_180509", "email")
+
+    with pytest.raises(ValueError):
+        run_scan(cfg, src, reread="ext", reread_ext=[])
+    p = build_parser()
+    a = p.parse_args(["triage", "scan", "--reread-ext", "eml,msg"])
+    assert a.reread_ext == "eml,msg" and a.reread is None
+    with pytest.raises(SystemExit):
+        p.parse_args(["triage", "scan", "--reread-ext", "eml", "--reread-all"])
+    assert build_argv("triage-scan", {"reread": "ext", "reread_ext": " .EML, msg "}) == [
+        "triage", "scan", "--reread-ext", "eml,msg"]
+    with pytest.raises(ValueError):
+        build_argv("triage-scan", {"reread": "ext", "reread_ext": ""})

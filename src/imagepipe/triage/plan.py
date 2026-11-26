@@ -33,7 +33,7 @@ from imagepipe.triage.naming import (Geocoder, build_name, date_from_mtime, date
 log = logging.getLogger("imagepipe")
 
 IMAGE_SIDECAR_EXT = {"xmp", "xmp_original", "aae"}
-EMBEDDED_SOURCES = ("exif", "video", "pdf", "office", "audio")
+EMBEDDED_SOURCES = ("exif", "video", "pdf", "office", "audio", "email")
 SIDECAR_SOURCES = ("takeout", "xmp")
 
 
