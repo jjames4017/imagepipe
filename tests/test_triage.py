@@ -723,3 +723,39 @@ def test_saved_web_pages_stay_together(env):
     assert r["file-cabinet:Saved/Old page_files/pic.jpg"]["dest_path"] == str(root / "Saved" / "Old page_files" / "pic.jpg")
     assert r["file-cabinet:Mine/my_files/holiday.jpg"]["bucket"] == "imagepipe"  # not a web folder
     assert r["file-cabinet:Saved/Whole page.mht"]["bucket"] == "sorted/web-pages"
+
+
+# ------------------------------------------------- #14 plan speed
+def test_plan_folder_query_uses_folder_index(env):
+    cfg, vault = env
+    assert run_scan(cfg, cfg.triage.source("file-cabinet"))["status"] == "finished"
+    db = sqlite3.connect(cfg.triage.database)
+    plan = db.execute("EXPLAIN QUERY PLAN SELECT * FROM files WHERE status IN ('catalogued','planned') "
+                      "AND source=? AND parent_id=? AND dir=? ORDER BY rel_path", ("file-cabinet", 0, "x")).fetchall()
+    text = " ".join(str(r[-1]) for r in plan)
+    assert "idx_tfiles_dir_path" in text and "TEMP B-TREE" not in text, text
+    names = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert "idx_tfiles_dir" not in names and "idx_tfiles_tid" in names
+    db.close()
+
+
+def test_plan_folder_error_only_undoes_that_folder(env, monkeypatch):
+    from imagepipe.triage import plan as plan_mod
+
+    cfg, vault = env
+    assert run_scan(cfg, cfg.triage.source("file-cabinet"))["status"] == "finished"
+    real = plan_mod.Planner.plan_group
+
+    def flaky(self, rows, source_folder, progress):
+        if rows and rows[0]["dir"] == "letters":
+            for r in rows:  # half-done work in the failing folder must be undone
+                self.t.update(r["id"], bucket="docupipe", status="planned")
+            raise RuntimeError("boom")
+        return real(self, rows, source_folder, progress)
+
+    monkeypatch.setattr(plan_mod.Planner, "plan_group", flaky)
+    assert run_plan(cfg)["status"] == "finished"
+    r = rows(cfg)
+    letter = r["file-cabinet:letters/letter.docx"]
+    assert letter["status"] == "error" and letter["bucket"] is None
+    assert r["file-cabinet:Tax/2019/receipt.pdf"]["status"] == "planned"

@@ -90,7 +90,12 @@ CREATE TABLE IF NOT EXISTS files (
     updated_at       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tfiles_path   ON files (source, parent_id, rel_path);
-CREATE INDEX IF NOT EXISTS idx_tfiles_dir    ON files (source, parent_id, dir);
+-- (source, parent_id, dir, rel_path): one folder's files, already in name order. With only
+-- (source, parent_id, dir) SQLite chose idx_tfiles_path to avoid sorting and walked the whole
+-- source for every folder, so plan slowed down with files x folders (issue #14).
+DROP INDEX IF EXISTS idx_tfiles_dir;
+CREATE INDEX IF NOT EXISTS idx_tfiles_dir_path ON files (source, parent_id, dir, rel_path);
+CREATE INDEX IF NOT EXISTS idx_tfiles_tid    ON files (triage_id);
 CREATE INDEX IF NOT EXISTS idx_tfiles_status ON files (status);
 CREATE INDEX IF NOT EXISTS idx_tfiles_sha    ON files (sha256);
 CREATE INDEX IF NOT EXISTS idx_tfiles_parent ON files (parent_id);
