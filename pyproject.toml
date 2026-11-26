@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "imagepipe"
-version = "0.3.12"
+version = "0.3.13"
 description = "A repeatable, never-delete photo ingest pipeline: catalogue, dedupe, classify, tag and hand off to PhotoPrism/Immich."
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
@@ -24,6 +24,7 @@ dependencies = [
 [project.optional-dependencies]
 heif = ["pillow-heif>=0.16"]
 triage = ["reverse_geocoder>=1.5"]
+layered = ["psd-tools>=1.9", "tifffile>=2023.1", "imagecodecs>=2023.1"]
 dev = ["pytest>=8", "mkdocs-material>=9"]
 
 [project.scripts]
