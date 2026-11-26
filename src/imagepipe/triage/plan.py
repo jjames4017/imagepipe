@@ -25,7 +25,7 @@ from imagepipe.progress import Progress
 from imagepipe.triage import db as tdb
 from imagepipe.triage.kinds import classify
 from imagepipe.triage.naming import (Geocoder, build_name, date_from_mtime, date_from_path,
-                                     descriptive_filename, is_default_clock, name_date_of, smartname)
+                                     ddmmyy_in, descriptive_filename, is_default_clock, name_date_of, smartname)
 
 log = logging.getLogger("imagepipe")
 
@@ -305,7 +305,12 @@ class Planner:
                 # an Office title is often the template's ("Risk Assessment Register"): a
                 # descriptive file name says more about this file (#23)
                 title = None
-            smart, smart_src = smartname(place_of.get(r["id"]), title, folders, _stem(name), tc.smartname_max_length)
+            stem = _stem(name)
+            if src == "filename":
+                short = ddmmyy_in(stem, folders, tc.day_first)
+                if short and date == short[0]:
+                    stem = stem.replace(short[1], " ")  # the DDMMYY date is in the name's date part now
+            smart, smart_src = smartname(place_of.get(r["id"]), title, folders, stem, tc.smartname_max_length)
             dest = None
             if bucket != "extract":
                 new_name = build_name(pid, date, smart, (r["ext"] or "").lower())

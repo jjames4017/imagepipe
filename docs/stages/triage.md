@@ -95,7 +95,10 @@ Two exceptions:
   anyway, its source shows as e.g. `exif-default-clock`.
 
 A compact `YYYYMMDDHHMMSS` timestamp in a file name
-(`DVR_20121124004613.mp4`) counts as a date and time.
+(`DVR_20121124004613.mp4`) counts as a date and time. A 6-digit `DDMMYY`
+number (`Shakespeare 120301`) counts as a date only when its year is within
+one year of a year in the folder names, since 6-digit numbers are often
+counters; when used it is removed from the smartname.
 
 When the date comes from inside the file, a sidecar or the file name and a time
 is known, the time is added: `2016-05-15_064331` (or `_0643` without seconds).
@@ -110,7 +113,8 @@ caption, Takeout description) or the meaningful folder names (up to two, e.g.
 `Fiji-day1`) plus the file name if it is descriptive. Camera names
 (`IMG_1234`, `DSC01234`, `PXL_...`), generic folders (`DCIM`, `100APPLE`,
 `Camera Roll`, `New Folder`, `batch_0042` ...) and dates (with any time
-straight after them) are left out. If nothing is left, the original file name
+straight after them) are left out, along with joining words left at either end
+once the dates are gone (`2001 & 2002 papers` -> `papers`). If nothing is left, the original file name
 is used.
 
 Smartnames contain only letters (accented letters and macrons kept, e.g. `ā`),
