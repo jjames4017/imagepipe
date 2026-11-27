@@ -18,8 +18,8 @@ Pages with a CHECK flag wait for you to review them in ScanSplitter's Projects p
 later run exports the pages you approved. When every page is done, the PDF moves to
 <filestack>/sorted/excluded/pdf-source/. ScanSplitter's own Deliver is never used.
 
-PDFs ScanSplitter can't take (over 200 MB or 200 pages, or a page too big for it to decode)
-are left where they are, listed as too large, and not tried again.
+PDFs that can't be read, and PDFs ScanSplitter can't take (over 200 MB or 200 pages, or a
+page too big for it to decode), also go to <filestack>/sorted/quarantine/pdf-uncertain/.
 """
 
 from __future__ import annotations
@@ -316,13 +316,10 @@ class PdfChecker:
         except (subprocess.SubprocessError, OSError):
             raise
         except Exception as exc:  # noqa: BLE001
-            self.save(pdf, **base, verdict="unreadable", state="done", final_path=str(pdf),
-                      note=f"pypdf can't read it: {type(exc).__name__}: {exc}"[:500])
-            self.bump("unreadable")
+            self.set_aside(pdf, base, 0, [], "unreadable", f"pypdf can't read it: {type(exc).__name__}: {exc}")
             return
         if count == 0:
-            self.save(pdf, **base, verdict="unreadable", state="done", final_path=str(pdf), note="no pages")
-            self.bump("unreadable")
+            self.set_aside(pdf, base, 0, [], "unreadable", "no pages")
             return
         if pages and pages[-1].get("verdict") == "document":
             self.bump("verdict:document")
@@ -383,9 +380,39 @@ class PdfChecker:
         self.export_ready(row, prog)
 
     def too_large(self, pdf: Path, base: dict, count: int, pages: list, why: str) -> None:
-        self.save(pdf, **base, pages=count, verdict="too-large", state="done", final_path=str(pdf),
-                  page_detail=pages, note=f"{why} - left where it is")
-        self.bump("too-large")
+        self.set_aside(pdf, base, count, pages, "too-large", why)
+
+    def set_aside(self, pdf: Path, base: dict, count: int, pages: list, verdict: str, why: str) -> None:
+        """Unreadable and too-large PDFs go to quarantine/pdf-uncertain."""
+        why = why[:400]
+        final = self.move(pdf, self.tc.bucket_dir("quarantine/pdf-uncertain"), f"pdf-{verdict}", why)
+        self.save(pdf, **base, pages=count, verdict=verdict, state="done", final_path=str(final),
+                  page_detail=pages, ss_project=None, ss_scans=None, note=why)
+        self.bump(verdict)
+
+    def move_left_behind(self) -> None:
+        """Unreadable/too-large PDFs that 0.5.0-0.5.2 left in sorted/documents: to quarantine now."""
+        documents = self.tc.bucket_dir("documents")
+        rows = [r for r in self.db.db.execute("SELECT * FROM pdf_checks WHERE verdict IN ('unreadable', 'too-large') "
+                                              "AND state='done'")
+                if r["final_path"] and Path(r["final_path"]).is_file()
+                and Path(r["final_path"]).is_relative_to(documents)]
+        if not rows:
+            return
+        say(f"Moving {len(rows):,} unreadable / too-large PDF(s) left in sorted/documents to quarantine/pdf-uncertain...")
+        with Progress("Unreadable / too large", total=len(rows), unit="PDFs") as prog:
+            for r in rows:
+                pdf = Path(r["final_path"])
+                prog.set_extra(pdf.name)
+                try:
+                    final = self.move(pdf, self.tc.bucket_dir("quarantine/pdf-uncertain"), f"pdf-{r['verdict']}",
+                                      r["note"] or "")
+                    self.save(Path(r["path"]), final_path=str(final))
+                    self.bump(f"moved-to-quarantine:{r['verdict']}")
+                except (MoveError, OSError) as exc:
+                    say(f"  {pdf}: {type(exc).__name__}: {exc}")
+                    self.bump("errors")
+                prog.update()
 
     def run(self, limit: int | None = None) -> dict:
         missing = tools_missing()
@@ -395,6 +422,7 @@ class PdfChecker:
         status = "finished"
         try:
             self.follow_up()
+            self.move_left_behind()
             todo = self.todo()
             say(f"PDFs to check in {self.tc.bucket_dir('documents')}: {len(todo):,}")
             if limit is not None and len(todo) > limit:
