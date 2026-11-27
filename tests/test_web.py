@@ -238,3 +238,16 @@ def test_settings_filestack_and_categories(web):
     assert saved["destinations"]["imagepipe"] == f"{vault}/imagepipe" and saved["work_dir"] == f"{vault}/triage-work"
     assert saved["categories"]["images"]["extensions"] == ["jpg"]
     assert cfg_text  # original kept as .bak by the save
+
+
+def test_tools_settings_and_test_button(web):
+    base, cfg, vault, app = web
+    tools = next(s for s in get(base, "/api/schema") if s["section"] == "tools")
+    assert {f["key"] for f in tools["fields"]} == {"scansplitter", "photoprism", "immich", "a_eye", "digikam"}
+    data = get(base, "/api/config")["data"]
+    data["tools"] = {"scansplitter": {"url": "http://127.0.0.1:9"}, "photoprism": {"url": "", "username": "",
+                                                                                    "password": ""}}
+    assert post(base, "/api/config", {"data": data})["ok"]
+    r = post(base, "/api/tools/test", {"tool": "scansplitter", "values": {"url": "http://127.0.0.1:9"}})
+    assert r["ok"] is False and "connect" in r["message"]
+    assert post(base, "/api/tools/test", {"tool": "nope", "values": {}})["ok"] is False

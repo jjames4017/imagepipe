@@ -18,7 +18,7 @@ There is **no login**: keep it on your LAN.
 | Plan review | Every file the last triage plan placed - from, to, bucket, rule, date and smartname and where each came from - filterable by bucket and rule, and searchable. Nothing here has moved yet |
 | Actions | Everything triage has done, newest first, filterable and searchable (the same as `actions.csv`) |
 | Reports | Every report and log, to read in the page or download, and the JPEG/PNG working copies from `imagepipe layered render` (click to view the picture). **Delete** next to each removes that file; **Delete all logs** removes every log and report listed. Both ask first and are refused while a job is running. The audit trail (`actions.csv`) and the triage database are always kept, and folders left empty are removed |
-| Settings | Every setting in the config file, as a form or as raw YAML. Triage shows the filestack folder read-only (it comes from `IMAGEPIPE_FILESTACK` in the compose file) and the **Categories** list: each category's extensions and the pipeline that picks it up, or none |
+| Settings | Every setting in the config file, as a form or as raw YAML. Triage shows the filestack folder read-only (it comes from `IMAGEPIPE_FILESTACK` in the compose file) and the **Categories** list: each category's extensions and the pipeline that picks it up, or none. **External tools**: the address (and login or API key) of ScanSplitter, PhotoPrism, Immich, A-Eye and digiKam, each with a **Test** button |
 
 **Apply asks first.** It is the one job that moves files, so the page shows how
 many files are planned and asks you to confirm.
@@ -65,3 +65,28 @@ job too (it resumes it just long enough to stop cleanly).
 A pause lasts only while the container runs. If the container is restarted
 while a job is paused, the job ends as if stopped; scan and apply carry on from
 where they were next time, and plan starts over (keeping every ID it gave).
+
+## External tools
+
+Settings -> **External tools** holds where each outside tool is: ScanSplitter,
+PhotoPrism (address, username, password), Immich (address, API key), A-Eye and
+digiKam. Nothing is hard-coded, so the same image works on any system.
+Apprise stays under **Notifications** and is tested with the Run tab's
+"Send a test notification".
+
+**Test** checks the tool from inside the ImagePipe container with what is in the
+form (saved or not) and changes nothing in the tool:
+
+| Tool | Test |
+|---|---|
+| ScanSplitter | `GET /api/health` answers `ok` |
+| PhotoPrism | `GET /api/v1/status` answers `operational`; with a username and password, signs in and out again |
+| Immich | `GET /api/server/ping` answers `pong`; with an API key, `GET /api/users/me` accepts it |
+| A-Eye, digiKam | the web page answers |
+
+HTTPS addresses with self-signed certificates are accepted. Passwords and keys
+are saved in `imagepipe.yml` in plain text.
+
+A container on Docker's host network can't reach containers on a macvlan
+network of the same host (and the reverse) - a Test that times out may mean
+that, not a wrong address.

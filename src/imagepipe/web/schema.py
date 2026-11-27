@@ -3,7 +3,8 @@
 Each field: key, type, label, help, and for some: choices, default.
 Types: str, path, int, bool, choice, multi (several choices), list (lines of
 text), size (e.g. 20MB), map (key -> choice), sources (list of records),
-group (fixed sub-mapping), readonly (shown, never saved: comes from the compose
+group (fixed sub-mapping; with "test" a Test button checks that tool), secret
+(a password or key: typed in a hidden field), readonly (shown, never saved: comes from the compose
 file), categories (name -> pipeline + extensions).
 """
 
@@ -78,9 +79,33 @@ TRIAGE = [
     {"key": "smartname_max_length", "type": "int", "label": "Smartname length", "default": 80},
 ]
 
+TOOLS = [
+    {"key": "scansplitter", "type": "group", "label": "ScanSplitter", "test": True,
+     "help": "Splits PDF photo pages into photos (triage). Test calls /api/health",
+     "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:8010"}]},
+    {"key": "photoprism", "type": "group", "label": "PhotoPrism", "test": True,
+     "help": "Test calls /api/v1/status and, with a username and password, checks the login (signing out again)",
+     "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:2342"},
+                {"key": "username", "type": "str", "label": "Username"},
+                {"key": "password", "type": "secret", "label": "Password"}]},
+    {"key": "immich", "type": "group", "label": "Immich", "test": True,
+     "help": "Test calls /api/server/ping and, with an API key, checks the key",
+     "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:2283"},
+                {"key": "api_key", "type": "secret", "label": "API key"}]},
+    {"key": "a_eye", "type": "group", "label": "A-Eye", "test": True,
+     "help": "Test opens the web page",
+     "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:8000"}]},
+    {"key": "digikam", "type": "group", "label": "digiKam", "test": True,
+     "help": "Test opens the web page",
+     "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:3011"}]},
+]
+
 SCHEMA = [
     {"section": None, "label": "General", "fields": TOP},
     {"section": "catalogue", "label": "Catalogue", "fields": CATALOGUE},
     {"section": "notify", "label": "Notifications", "fields": NOTIFY},
+    {"section": "tools", "label": "External tools", "optional": True, "fields": TOOLS,
+     "help": "Where each outside tool is. Saved in imagepipe.yml (passwords and keys too). Test checks a tool "
+             "from this container, using what is typed in the form, saved or not."},
     {"section": "triage", "label": "Triage", "optional": True, "fields": TRIAGE},
 ]
