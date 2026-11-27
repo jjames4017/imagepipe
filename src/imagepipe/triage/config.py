@@ -57,8 +57,7 @@ class TriageConfig:
     max_archive_depth: int = 5
     max_extract_bytes: int = 200 << 30
     smartname_max_length: int = 80
-    pdf_photo_coverage: int = 60   # % of a page ScanSplitter's photos must cover for a photo page
-    pdf_text_chars: int = 50       # fewer letters/digits than this (text layer or OCR) = "little text"
+    pdf_text_words: int = 7        # a PDF with a page holding more words than this is a document
     categories: dict[str, dict] = field(default_factory=dict)  # name -> {pipeline, extensions}
     overrides: dict[str, str] = field(default_factory=dict)    # ext -> bucket, where it differs from the defaults
     legacy_destinations: dict[str, Path] = field(default_factory=dict)
@@ -93,7 +92,8 @@ class TriageConfig:
 KNOWN = {
     "database", "log_dir", "reports_dir", "sources", "workers", "verify", "categories",
     "embed_metadata", "reverse_geocode", "day_first", "live_photo_max_bytes", "max_archive_depth",
-    "max_extract_bytes", "smartname_max_length", "pdf_photo_coverage", "pdf_text_chars",
+    "max_extract_bytes", "smartname_max_length", "pdf_text_words",
+    "pdf_photo_coverage", "pdf_text_chars",  # 0.5.0-0.5.1 PDF check settings: accepted, no longer used
     # before 0.4: kept so `imagepipe triage relocate` knows where files were; not used otherwise
     "destinations", "work_dir", "bucket_overrides",
 }
@@ -165,8 +165,7 @@ def parse_triage(data: dict | None) -> TriageConfig | None:
         max_archive_depth=int(data.get("max_archive_depth", 5)),
         max_extract_bytes=parse_size(data.get("max_extract_bytes", "200GB"), "max_extract_bytes"),
         smartname_max_length=int(data.get("smartname_max_length", 80)),
-        pdf_photo_coverage=int(data.get("pdf_photo_coverage", 60)),
-        pdf_text_chars=int(data.get("pdf_text_chars", 50)),
+        pdf_text_words=int(data.get("pdf_text_words", 7)),
         categories=categories,
         overrides=overrides,
         legacy_destinations=legacy_destinations,
@@ -176,10 +175,8 @@ def parse_triage(data: dict | None) -> TriageConfig | None:
         raise ConfigError("triage.verify must be 'auto' or 'hash'")
     if cfg.workers < 1:
         raise ConfigError("triage.workers must be at least 1")
-    if not 1 <= cfg.pdf_photo_coverage <= 100:
-        raise ConfigError("triage.pdf_photo_coverage must be a percentage from 1 to 100")
-    if cfg.pdf_text_chars < 0:
-        raise ConfigError("triage.pdf_text_chars can't be negative")
+    if cfg.pdf_text_words < 0:
+        raise ConfigError("triage.pdf_text_words can't be negative")
     if cfg.smartname_max_length < 10:
         raise ConfigError("triage.smartname_max_length must be at least 10")
 

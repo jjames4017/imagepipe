@@ -426,22 +426,17 @@ PDFs), and follows up PDFs waiting for review. `--limit N` (Run tab: the
 **limit** box) checks at most N new PDFs, for a trial run; the next run carries
 on with the rest. PDFs waiting for review are always followed up.
 
-Each page is read for text - its text layer, and Tesseract OCR when the text
-layer has little - and, if it holds any image, sent to ScanSplitter to find
-photos:
-
-| Page | When |
-|---|---|
-| photo page | ScanSplitter's photos cover at least **`pdf_photo_coverage`** % of the page (default 60) and it has little or no text (fewer than **`pdf_text_chars`** letters and digits, default 50) |
-| document page | substantial text and no photos (a page with text and no images at all is not sent to ScanSplitter) |
-| uncertain | anything else, or ScanSplitter's detection failed |
+Each PDF is first read for words, page by page: its text layer, and Tesseract
+OCR when a page's text layer has **`pdf_text_words`** words or fewer (default
+7). A word is a run of 2 or more letters or digits, so OCR specks on a photo
+don't count.
 
 | PDF | Goes to |
 |---|---|
-| every page a photo page | split by ScanSplitter (below) |
-| every page a document page | stays in `sorted/documents/` |
-| a mix, or any uncertain page | `sorted/quarantine/pdf-uncertain/` |
-| over ScanSplitter's limits (200 MB, 200 pages) | stays where it is, listed as too large |
+| any page has more than `pdf_text_words` words | a document: stays in `sorted/documents/`. Checking stops at that page and the PDF never goes to ScanSplitter |
+| no page has, and ScanSplitter finds photos on every page | split by ScanSplitter (below) |
+| no page has, and any page has no photos (or detection failed) | `sorted/quarantine/pdf-uncertain/` |
+| too big for ScanSplitter: over 200 MB or 200 pages, or a page too large for it to decode | stays where it is, listed as too large, not tried again |
 
 **Splitting.** Each run makes its own ScanSplitter project
 ("ImagePipe PDF check <date> <time>") and uploads the photo PDFs into it.

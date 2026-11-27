@@ -59,8 +59,7 @@ triage:
   max_archive_depth: 5                        # archives inside archives, this deep
   max_extract_bytes: 200GB                    # an archive that unpacks to more than this goes to quarantine/archive-failed
   smartname_max_length: 80
-  pdf_photo_coverage: 60                      # Check PDFs: ScanSplitter's photos must cover this % of a page for a photo page
-  pdf_text_chars: 50                          # Check PDFs: fewer letters/digits than this on a page = little or no text
+  pdf_text_words: 7                           # Check PDFs: a PDF with a page of more words than this is a document
   # categories:                               # leave out for the built-in list (images and raw -> imagepipe)
   #   documents: {pipeline: none, extensions: [pdf, docx, txt]}
 
