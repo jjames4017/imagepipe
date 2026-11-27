@@ -436,7 +436,8 @@ don't count.
 | any page has more than `pdf_text_words` words | a document: stays in `sorted/documents/`. Checking stops at that page and the PDF never goes to ScanSplitter |
 | no page has, and ScanSplitter finds photos on every page | split by ScanSplitter (below) |
 | no page has, and any page has no photos (or detection failed) | `sorted/quarantine/pdf-uncertain/` |
-| too big for ScanSplitter: over 200 MB or 200 pages, or a page too large for it to decode | stays where it is, listed as too large, not tried again |
+| too big for ScanSplitter: over 200 MB or 200 pages, or a page too large for it to decode | `sorted/quarantine/pdf-uncertain/` (listed as too large) |
+| can't be read (the PDF reader fails, or it has no pages) | `sorted/quarantine/pdf-uncertain/` (listed as unreadable) |
 
 **Splitting.** Each run makes its own ScanSplitter project
 ("ImagePipe PDF check <date> <time>") and uploads the photo PDFs into it.

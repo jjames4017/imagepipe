@@ -261,6 +261,31 @@ def test_page_too_big_for_scansplitter(setup, monkeypatch):
     monkeypatch.setattr(ScanSplitter, "add_pdf", refuse)
     res = pdfcheck.run_pdf_check(cfg)
     assert res["stats"] == {"too-large": 1}
-    assert (docs / "chart.pdf").exists()
+    assert not (docs / "chart.pdf").exists()
+    assert (stack / "sorted/quarantine/pdf-uncertain/box1/chart.pdf").exists()
     res = pdfcheck.run_pdf_check(cfg)          # not tried again
     assert res["stats"] == {}
+
+
+@needs_tools
+def test_unreadable_to_quarantine_and_left_behind_moved(setup):
+    cfg, docs, stack = setup
+    (docs / "broken.pdf").write_bytes(b"not a pdf at all")
+    res = pdfcheck.run_pdf_check(cfg)
+    assert res["stats"] == {"unreadable": 1}
+    q = stack / "sorted/quarantine/pdf-uncertain/box1"
+    assert (q / "broken.pdf").exists()
+    # a PDF an earlier version left in sorted/documents as too large
+    (docs / "old.pdf").write_bytes(b"x")
+    from imagepipe.triage import db as tdb
+    from imagepipe.fspath import to_db
+    t = tdb.TriageDB(cfg.triage.database, cfg.tz, cfg.triage.reports_dir / "actions.csv")
+    st = (docs / "old.pdf").stat()
+    t.db.execute("INSERT INTO pdf_checks (path, size, mtime, verdict, state, final_path, note) "
+                 "VALUES (?, ?, ?, 'too-large', 'done', ?, 'old')",
+                 (to_db(str(docs / "old.pdf")), st.st_size, st.st_mtime, to_db(str(docs / "old.pdf"))))
+    t.db.commit()
+    t.close()
+    res = pdfcheck.run_pdf_check(cfg)
+    assert res["stats"] == {"moved-to-quarantine:too-large": 1}
+    assert (q / "old.pdf").exists() and not (docs / "old.pdf").exists()

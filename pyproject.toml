@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "imagepipe"
-version = "0.5.2"
+version = "0.5.3"
 description = "A repeatable, never-delete photo ingest pipeline: catalogue, dedupe, classify, tag and hand off to PhotoPrism/Immich."
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
