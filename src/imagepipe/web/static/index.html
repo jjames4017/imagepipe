@@ -33,9 +33,9 @@
   button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
   button.danger { border-color:var(--warn); color:var(--warn); }
   button:disabled { opacity:.45; cursor:not-allowed; }
-  input[type=text], input[type=number], select, textarea { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px;
+  input[type=text], input[type=password], input[type=number], select, textarea { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px;
            background:var(--bg); color:var(--ink); }
-  input[type=text] { min-width:260px; } textarea { width:100%; }
+  input[type=text], input[type=password] { min-width:260px; } textarea { width:100%; }
   label.inline { display:inline-flex; gap:6px; align-items:center; margin-right:12px; }
   pre { font: 12.5px/1.45 var(--mono); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px;
         overflow:auto; white-space:pre-wrap; word-break:break-word; margin:0; }
@@ -49,7 +49,7 @@
   .pill { display:inline-block; padding:1px 8px; border-radius:20px; background:var(--bg); border:1px solid var(--line); font-size:12px; }
   .field { display:grid; grid-template-columns: 240px 1fr; gap:10px; padding:8px 0; border-bottom:1px dashed var(--line); align-items:start; }
   .field .help { color:var(--muted); font-size:12px; margin-top:3px; }
-  .field input[type=text] { width:100%; }
+  .field input[type=text], .field input[type=password] { width:100%; }
   .rec { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-bottom:8px; }
   .rec .field { grid-template-columns: 180px 1fr; border-bottom:0; padding:4px 0; }
   .msg { padding:8px 12px; border-radius:6px; margin:8px 0; display:none; }
@@ -410,8 +410,9 @@ function inputFor(f, val, path) {
     case "int": return `<input type="number" id="${id}" data-path="${esc(path.join("."))}" data-type="int" value="${esc(v ?? "")}" style="width:140px">`;
     case "choice": return `<select data-path="${esc(path.join("."))}" data-type="choice">${f.choices.map(c => `<option ${c === v ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`;
     case "multi": return f.choices.map(c => `<label class="inline"><input type="checkbox" data-path="${esc(path.join("."))}" data-type="multi" value="${esc(c)}" ${(v || []).includes(c) ? "checked" : ""}> ${esc(c)}</label>`).join("");
+    case "secret": return `<input type="password" autocomplete="new-password" data-path="${esc(path.join("."))}" data-type="secret" value="${esc(v ?? "")}">`;
     case "list": return `<textarea rows="3" data-path="${esc(path.join("."))}" data-type="list" placeholder="one per line">${esc((v || []).join("\n"))}</textarea>`;
-    default: return `<input type="text" data-path="${esc(path.join("."))}" data-type="${f.type}" ${f.optional ? 'data-optional="1"' : ""} value="${esc(v ?? "")}">`;
+    default: return `<input type="text" data-path="${esc(path.join("."))}" data-type="${f.type}" ${f.optional ? 'data-optional="1"' : ""} ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ""} value="${esc(v ?? "")}">`;
   }
 }
 function fieldRow(f, html) {
@@ -426,7 +427,8 @@ function renderForm(data) {
   for (const sec of SCHEMA) {
     const base = sec.section ? (data[sec.section] || {}) : data;
     const present = !sec.section || data[sec.section] !== undefined;
-    out.push(`<div class="card" data-section="${esc(sec.section || "")}"><h2>${esc(sec.label)}</h2>`);
+    out.push(`<div class="card" data-section="${esc(sec.section || "")}"><h2>${esc(sec.label)}</h2>` +
+      (sec.help ? `<div class="help" style="margin-bottom:8px">${esc(sec.help)}</div>` : ""));
     if (sec.optional) out.push(`<label class="inline"><input type="checkbox" data-enable="${esc(sec.section)}" ${present ? "checked" : ""}> use this section</label>`);
     for (const f of sec.fields) {
       const path = sec.section ? [sec.section, f.key] : [f.key];
@@ -436,7 +438,9 @@ function renderForm(data) {
           <button class="b" type="button" data-add="${esc(path.join("."))}">Add</button>`));
       } else if (f.type === "group") {
         const g = base[f.key] || {};
-        out.push(fieldRow(f, f.fields.map(sub => `<div class="row"><span style="width:200px" class="muted">${esc(sub.label)}</span>${inputFor(sub, g[sub.key], [...path, sub.key])}</div>`).join("")));
+        out.push(fieldRow(f, f.fields.map(sub => `<div class="row"><span style="width:200px" class="muted">${esc(sub.label)}</span>${inputFor(sub, g[sub.key], [...path, sub.key])}</div>`).join("") +
+          (f.test ? `<div class="row"><button class="b" type="button" data-testtool="${esc(f.key)}" data-testpath="${esc(path.join("."))}">Test</button>
+            <span data-testres="${esc(f.key)}" class="muted"></span></div>` : "")));
       } else if (f.type === "readonly") {
         const v = (META.env || {})[f.env] || "";
         out.push(fieldRow(f, v ? `<code>${esc(v)}</code>` : `<span style="color:var(--warn)">not set - add ${esc(f.env)} to the compose file</span>`));
@@ -471,6 +475,7 @@ function renderForm(data) {
     if (t.matches("[data-remove]")) t.closest(".rec").remove();
     if (t.matches("[data-remove-row]")) t.closest("[data-maprow]").remove();
     if (t.matches("[data-remove-cat]")) t.closest("[data-catrow]").remove();
+    if (t.matches("[data-testtool]")) testTool(t.dataset.testtool, t.dataset.testpath);
     if (t.matches("[data-addcat]")) { const p = t.dataset.addcat; $(`[data-cats="${p}"]`).insertAdjacentHTML("beforeend", $(`[data-cattpl="${p}"]`).innerHTML); }
     if (t.matches("[data-addmap]")) { const p = t.dataset.addmap; $(`[data-map="${p}"]`).insertAdjacentHTML("beforeend", $(`[data-maptpl="${p}"]`).innerHTML); }
     if (t.matches("[data-add]")) {
@@ -480,6 +485,18 @@ function renderForm(data) {
       list.insertAdjacentHTML("beforeend", recordHtml(f, {}, [...p.split("."), list.children.length + Date.now()]));
     }
   };
+}
+async function testTool(tool, path) {
+  const values = {};
+  $$(`[data-path^="${path}."]`).forEach(el => { values[el.dataset.path.split(".").pop()] = el.value.trim(); });
+  const out = $(`[data-testres="${tool}"]`);
+  out.textContent = "Testing...";
+  out.style.color = "";
+  try {
+    const r = await api("/api/tools/test", {tool, values});
+    out.textContent = (r.ok ? "OK - " : "Failed - ") + r.message;
+    out.style.color = r.ok ? "var(--ok)" : "var(--warn)";
+  } catch (e) { out.textContent = "Failed - " + e.message; out.style.color = "var(--warn)"; }
 }
 function readValue(el) {
   const t = el.dataset.type;

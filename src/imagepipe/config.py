@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 
 if TYPE_CHECKING:  # pragma: no cover
+    from imagepipe.tools import ToolsConfig
     from imagepipe.triage.config import TriageConfig
 
 DEFAULT_CONFIG_PATH = "/config/imagepipe.yml"
@@ -66,6 +67,7 @@ class Config:
     notify: NotifyConfig
     path: Path | None = None
     triage: "TriageConfig | None" = None
+    tools: "ToolsConfig | None" = None
 
     @property
     def tz(self) -> ZoneInfo:
@@ -140,11 +142,13 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
     if not isinstance(notify.events, list) or not all(isinstance(e, str) for e in notify.events):
         raise ConfigError("notify.events must be a list of event names, e.g. [finished, error]")
 
-    known_top = {"timezone", "manifest", "log_dir", "reports_dir", "sources", "catalogue", "notify", "triage"}
+    known_top = {"timezone", "manifest", "log_dir", "reports_dir", "sources", "catalogue", "notify", "triage",
+                 "tools"}
     unknown = {str(k) for k in data} - known_top
     if unknown:
         raise ConfigError(f"Unknown top-level key(s): {', '.join(sorted(unknown))}")
 
+    from imagepipe.tools import parse_tools
     from imagepipe.triage.config import parse_triage
 
     return Config(
@@ -157,4 +161,5 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         notify=notify,
         path=path,
         triage=parse_triage(data.get("triage")),
+        tools=parse_tools(data.get("tools")),
     )

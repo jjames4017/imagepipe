@@ -1,3 +1,3 @@
 """ImagePipe: a repeatable, never-delete photo ingest pipeline."""
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"

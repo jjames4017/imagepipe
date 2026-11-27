@@ -536,6 +536,10 @@ def make_handler(app: App):
                     self._json(app.save_config_data(body.get("data") or {}))
                 elif url.path == "/api/config/raw":
                     self._json(app.save_config_text(body.get("text") or ""))
+                elif url.path == "/api/tools/test":
+                    from imagepipe.tools import check
+
+                    self._json(check(str(body.get("tool") or ""), body.get("values") or {}))
                 elif url.path == "/api/reports/delete":
                     self._json(app.delete_reports(body.get("paths") or [], everything=bool(body.get("all"))))
                 else:

@@ -61,3 +61,13 @@ triage:
   smartname_max_length: 80
   # categories:                               # leave out for the built-in list (images and raw -> imagepipe)
   #   documents: {pipeline: none, extensions: [pdf, docx, txt]}
+
+# External tools (optional): where each outside tool is, so nothing is hard-coded.
+# Edit in the web UI (Settings -> External tools), where each has a Test button.
+# Passwords and keys are saved here in plain text; keep this file's folder private.
+# tools:
+#   scansplitter: {url: http://<host>:8010}
+#   photoprism:   {url: http://<host>:2342, username: admin, password: ""}
+#   immich:       {url: http://<host>:2283, api_key: ""}
+#   a_eye:        {url: http://<host>:8000}
+#   digikam:      {url: http://<host>:3011}
