@@ -379,7 +379,7 @@ class PdfChecker:
         row = self.db.db.execute("SELECT * FROM pdf_checks WHERE path=?", (to_db(str(pdf)),)).fetchone()
         self.export_ready(row, prog)
 
-    def run(self) -> dict:
+    def run(self, limit: int | None = None) -> dict:
         missing = tools_missing()
         if missing:
             raise RuntimeError("The PDF check needs: " + ", ".join(missing))
@@ -389,6 +389,9 @@ class PdfChecker:
             self.follow_up()
             todo = self.todo()
             say(f"PDFs to check in {self.tc.bucket_dir('documents')}: {len(todo):,}")
+            if limit is not None and len(todo) > limit:
+                todo = todo[:limit]
+                say(f"Limit: checking {limit:,} of them this run; the next run carries on with the rest.")
             total_bytes = sum(p.stat().st_size for p in todo)
             with Progress("Check PDFs", total=len(todo), total_bytes=total_bytes, unit="PDFs") as prog:
                 for pdf in todo:
@@ -442,8 +445,8 @@ def summary(pages: list[dict]) -> str:
     return ", ".join(f"{n} {k}" for k, n in sorted(counts.items()))
 
 
-def run_pdf_check(cfg) -> dict:
-    return PdfChecker(cfg).run()
+def run_pdf_check(cfg, limit: int | None = None) -> dict:
+    return PdfChecker(cfg).run(limit)
 
 
 def status_rows(db) -> list:

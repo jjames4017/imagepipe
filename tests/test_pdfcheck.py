@@ -225,3 +225,14 @@ def test_scansplitter_down(setup, monkeypatch):
     with pytest.raises(Exception, match="ScanSplitter"):
         pdfcheck.run_pdf_check(cfg)
     assert (docs / "album.pdf").exists()
+
+
+@needs_tools
+def test_limit(setup):
+    cfg, docs, stack = setup
+    for n in range(3):
+        (docs / f"letter{n}.pdf").write_bytes(text_pdf())
+    res = pdfcheck.run_pdf_check(cfg, limit=2)
+    assert res["stats"]["verdict:document"] == 2
+    res = pdfcheck.run_pdf_check(cfg, limit=2)
+    assert res["stats"]["verdict:document"] == 1

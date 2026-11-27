@@ -208,7 +208,7 @@ def cmd_triage_check_pdfs(cfg, args) -> int:
 
     tc = _triage_cfg(cfg)
     try:
-        result = run_pdf_check(cfg)
+        result = run_pdf_check(cfg, limit=args.limit)
     except Exception as exc:
         log.exception("PDF check failed")
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -425,6 +425,8 @@ def build_parser() -> argparse.ArgumentParser:
     ta.set_defaults(func=cmd_triage_apply)
     tc_ = tsub.add_parser("check-pdfs", help="sort the PDFs in sorted/documents into documents, photo scans "
                           "(split by ScanSplitter) and uncertain")
+    tc_.add_argument("--limit", type=int, help="check at most this many new PDFs (for a trial run); PDFs waiting "
+                     "for review in ScanSplitter are still followed up")
     tc_.set_defaults(func=cmd_triage_check_pdfs)
     tst = tsub.add_parser("status", help="counts by status and bucket, recent runs")
     tst.set_defaults(func=cmd_triage_status)
