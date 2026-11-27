@@ -101,3 +101,9 @@ catalogue:
 @pytest.fixture
 def cfg(tmp_path, tree):
     return load_config(write_config(tmp_path, tree))
+
+
+@pytest.fixture(autouse=True)
+def _filestack_env(tmp_path, monkeypatch):
+    """Triage needs IMAGEPIPE_FILESTACK (set in the compose file); tests use <tmp>/vault/filestack."""
+    monkeypatch.setenv("IMAGEPIPE_FILESTACK", str(tmp_path / "vault" / "filestack"))

@@ -451,7 +451,7 @@ def run_apply(cfg: Config, limit: int | None = None) -> dict:
         moving = t.db.execute(f"SELECT COUNT(*) FROM files WHERE status='{tdb.MOVING}'").fetchone()[0]
         if planned == 0 and moving == 0:
             say("Nothing is planned. Run `triage scan` and `triage plan` first.")
-        for root in list(tc.destinations.values()) + [tc.work_dir]:
+        for root in (tc.sorted_dir, tc.work_dir):
             root.mkdir(parents=True, exist_ok=True)
             if not os.access(root, os.W_OK):
                 raise TriageAbort(f"No write access to {root}")

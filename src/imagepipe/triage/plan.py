@@ -68,11 +68,7 @@ def takeout_candidates(json_name: str, title: str | None) -> list[str]:
 
 
 def _dest_dir(tc, source_folder: str, bucket: str, logical_dir: str) -> Path:
-    if "/" in bucket:
-        root_key, sub = bucket.split("/", 1)
-        base = tc.destinations[root_key] / sub
-    else:
-        base = tc.destinations[bucket]
+    base = tc.bucket_dir(bucket)
     parts = [p for p in logical_dir.split("/") if p] if logical_dir else []
     return base.joinpath(source_folder, *parts)
 
@@ -91,7 +87,7 @@ def _office_year(r) -> list[str]:
     return [r["meta_date"][:4]] if r["meta_date_src"] == "office" and r["meta_date"] else []
 
 
-WEB_BUCKET = "sorted/web-pages"
+WEB_BUCKET = "web-pages"
 PAGE_EXT = {"htm", "html", "shtml", "xhtml"}
 SINGLE_FILE_PAGE_EXT = {"mht", "mhtml"}
 WEB_ASSET_EXT = {"css", "js", "htm", "html"}
@@ -224,7 +220,7 @@ class Planner:
                 return drift[0], drift[1]
             return name_date_of(meta), src
         found = date_from_path(name, folders, tc.day_first)
-        if found and bucket == "sorted/ebooks" and found[1] == "filename" and len(found[0]) == 4:
+        if found and bucket == "ebooks" and found[1] == "filename" and len(found[0]) == 4:
             found = date_from_path("", folders, tc.day_first)  # a year in a book title isn't its date (#36)
         if found:
             if drift and not far_apart(found[0][:10], drift[2]):
@@ -268,16 +264,16 @@ class Planner:
         else:
             web = None
         by_id = {r["id"]: r for r in rows}
-        decided: dict[int, tuple[str, str]] = {r["id"]: classify(r, tc.bucket_overrides) for r in rows}
+        decided: dict[int, tuple[str, str]] = {r["id"]: classify(r, tc.overrides) for r in rows}
         for r in rows:
             if web is not None and web.is_page(r) and decided[r["id"]][0] not in ("quarantine/zero-byte",
                                                                                  "quarantine/system-junk"):
                 decided[r["id"]] = (WEB_BUCKET, "web-page")
         for r in rows:  # multi-page, layered or unreadable TIFFs go to specials too (#55)
-            if (r["ext"] or "").lower() in ("tif", "tiff") and decided[r["id"]][0] == "imagepipe":
+            if (r["ext"] or "").lower() in ("tif", "tiff") and decided[r["id"]][0] == "images":
                 why = special_tiff(r["current_path"], bool(r["catalogue_error"]))
                 if why:
-                    decided[r["id"]] = ("sorted/specials", f"special-tiff-{why}")
+                    decided[r["id"]] = ("specials", f"special-tiff-{why}")
         by_name = {os.path.basename(r["rel_path"]).lower(): r for r in rows}
         media_by_stem: dict[str, list] = {}
         for r in rows:
@@ -373,7 +369,7 @@ class Planner:
                 short = ddmmyy_in(stem, folders + _office_year(r), tc.day_first)
                 if short and date == short[0]:
                     stem = stem.replace(short[1], " ")  # the DDMMYY date is in the name's date part now
-            ebook = bucket == "sorted/ebooks"
+            ebook = bucket == "ebooks"
             smart, smart_src = smartname(place_of.get(r["id"]), title, folders, stem, tc.smartname_max_length,
                                          keep_dates=ebook, used_date=date)
             if bucket and bucket.startswith("quarantine/"):
@@ -424,7 +420,7 @@ class Planner:
             elif cols["dest_path"] is None:
                 # a companion whose parent is an archive: it goes on its own
                 row = by_id[fid]
-                bucket, rule = classify(row, tc.bucket_overrides)
+                bucket, rule = classify(row, tc.overrides)
                 if bucket == "extract":
                     cols.update(bucket=bucket, rule=rule, companion_of=None)
                 else:

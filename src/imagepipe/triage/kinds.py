@@ -2,8 +2,13 @@
 
 classify(row, overrides) -> (bucket, rule)
 
-Buckets: imagepipe, docupipe, extract, sorted/<type>, quarantine/<reason>.
+Buckets: a category name (images, raw, documents, video, ... specials), extract,
+or quarantine/<reason>. Every bucket is a folder under <filestack>/sorted/.
 The rule is a short name for why, recorded against every file.
+
+Categories and their extensions can be changed in the config (triage.categories);
+DEFAULT_CATEGORIES below is what you get without that. An extension moved to another
+category there becomes an override here, so the content checks still apply first.
 """
 
 from __future__ import annotations
@@ -61,6 +66,35 @@ for _bucket, _exts in {
     for _e in _exts:
         EXT_BUCKET.setdefault(_e, _bucket)
 
+DEFAULT_CATEGORIES: dict[str, dict] = {}
+"""Category -> {pipeline, extensions}, in display order."""
+
+
+def _build_defaults() -> None:
+    from imagepipe.detect import IMAGE_EXT, RAW_EXT
+
+    groups: dict[str, set[str]] = {
+        "images": set(IMAGE_EXT) - SPECIAL_EXT - set(EXT_BUCKET),
+        "raw": set(RAW_EXT),
+        "documents": (DOCUPIPE_EXT - set(EXT_BUCKET)) | {"pdf"},
+    }
+    for ext, bucket in EXT_BUCKET.items():
+        groups.setdefault(bucket.split("/", 1)[1], set()).add(ext)
+    groups["specials"] = set(SPECIAL_EXT)
+    groups["web-pages"] = set()
+    groups["raw-processed"] = set()  # RAW originals after ImagePipe made the working copy
+    order = ["images", "raw", "documents", "video", "audio", "ebooks", "email", "code", "fonts", "software",
+             "disk-images", "web-pages", "other-known", "specials", "raw-processed"]
+    for name in order + sorted(set(groups) - set(order)):
+        DEFAULT_CATEGORIES[name] = {
+            "pipeline": "imagepipe" if name in ("images", "raw") else "none",
+            "extensions": sorted(groups.get(name, ())),
+        }
+
+
+_build_defaults()
+DEFAULT_EXT_CATEGORY = {e: c for c, v in DEFAULT_CATEGORIES.items() for e in v["extensions"]}
+
 # Content kinds that, if the file's extension promised them, make a file whose
 # contents are something else (e.g. a ".jpg" that is really an HTML error page) corrupt.
 _PROMISE_KINDS = {"image", "raw", "video", "audio", "pdf"}
@@ -83,6 +117,27 @@ def _expected_kind(ext: str) -> str | None:
     return _MEDIA_EXT_KIND.get(ext)
 
 
+def kind_category(kind: str) -> str:
+    return "raw" if kind == "raw" else "images"
+
+
+def ext_category(ext: str) -> str:
+    return EXT_BUCKET[ext].split("/", 1)[1]
+
+
+def legacy_bucket(bucket: str, ext: str = "") -> str:
+    """A bucket name from before 0.4 (imagepipe, docupipe, sorted/<type>) as today's name."""
+    from imagepipe.detect import RAW_EXT
+
+    if bucket == "imagepipe":
+        return "raw" if ext in RAW_EXT else "images"
+    if bucket == "docupipe":
+        return "documents"
+    if bucket.startswith("sorted/"):
+        return bucket.split("/", 1)[1]
+    return bucket
+
+
 def classify(row, overrides: dict[str, str]) -> tuple[str, str]:
     """Bucket and rule for one catalogued file (before sidecar/Live Photo pairing)."""
     kind = row["kind"] or "unknown"
@@ -101,7 +156,7 @@ def classify(row, overrides: dict[str, str]) -> tuple[str, str]:
     if name.lower() in JUNK_NAMES:  # by name, so a name added later applies without a re-scan (#42)
         return "quarantine/system-junk", "system-junk-file"
     if ext in SPECIAL_EXT and kind not in ("empty", "junk"):
-        return "sorted/specials", f"special-{ext}"
+        return "specials", f"special-{ext}"
     if kind == "junk":
         return "quarantine/system-junk", "system-junk-file"
     if err.startswith("read:"):
@@ -112,23 +167,23 @@ def classify(row, overrides: dict[str, str]) -> tuple[str, str]:
         return "quarantine/system-junk", f"temp-or-backup-{ext}"
 
     if mime == "text/plain" and EXT_BUCKET.get(ext) in ("sorted/code", "sorted/other-known"):
-        return EXT_BUCKET[ext], f"ext-{ext}"  # e.g. a TypeScript .ts file, not an MPEG-TS video
+        return ext_category(ext), f"ext-{ext}"  # e.g. a TypeScript .ts file, not an MPEG-TS video
     if row["ext_mismatch"] and _expected_kind(ext) in _PROMISE_KINDS and kind in ("unknown", "document", "sidecar"):
         return "quarantine/corrupt", f"content-not-{_expected_kind(ext)}"
 
     if kind in ("image", "raw"):
-        return "imagepipe", kind
+        return kind_category(kind), kind
     if kind == "sidecar":
-        return "imagepipe", "sidecar-unmatched"
+        return "images", "sidecar-unmatched"
     if kind == "pdf":
-        return "docupipe", "pdf"
+        return "documents", "pdf"
     if kind == "video":
-        return "sorted/video", "video"
+        return "video", "video"
     if kind == "audio":
-        return "sorted/audio", "audio"
+        return "audio", "audio"
     if kind == "archive":
         if ext in EXT_BUCKET:  # zip-based ebooks/software (.cbz, .apk, .jar ...)
-            return EXT_BUCKET[ext], f"zip-based-{ext}"
+            return ext_category(ext), f"zip-based-{ext}"
         if ext in ARCHIVE_EXTRACT_EXT:
             return "extract", f"archive-{ext}"
         return "quarantine/unknown-type", "unrecognised-extension"
@@ -136,15 +191,15 @@ def classify(row, overrides: dict[str, str]) -> tuple[str, str]:
         if row["encrypted"]:  # password-protected Office file
             return "quarantine/encrypted", "encrypted-document"
         if row["takeout_title"]:
-            return "imagepipe", "takeout-json-unmatched"
+            return "images", "takeout-json-unmatched"
         if ext in EXT_BUCKET:
-            return EXT_BUCKET[ext], f"ext-{ext}"
+            return ext_category(ext), f"ext-{ext}"
         if ext in DOCUPIPE_EXT:
-            return "docupipe", f"document-{ext}"
+            return "documents", f"document-{ext}"
         return "quarantine/unknown-type", "unrecognised-extension"
     # unknown content
     if ext in EXT_BUCKET:
-        return EXT_BUCKET[ext], f"ext-{ext}"
+        return ext_category(ext), f"ext-{ext}"
     if ext in DOCUPIPE_EXT:
-        return "docupipe", f"document-{ext}"
+        return "documents", f"document-{ext}"
     return "quarantine/unknown-type", "unknown-content"

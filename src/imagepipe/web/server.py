@@ -31,6 +31,7 @@ import yaml
 from imagepipe import __version__
 from imagepipe.config import ConfigError, load_config
 from imagepipe.progress import parse_line
+from imagepipe.triage.config import FILESTACK_ENV
 from imagepipe.web.schema import SCHEMA
 
 # Commands the UI may run: id -> (label, argv builder from options)
@@ -261,6 +262,11 @@ class App:
                 os.unlink(tmp)
 
     def save_config_data(self, data: dict) -> dict:
+        # The old triage folders (before 0.4) aren't in the form but `triage relocate` needs them
+        old = (self.config_data().get("triage") or {}) if isinstance(data.get("triage"), dict) else {}
+        for key in ("destinations", "work_dir"):
+            if key in old and key not in data["triage"]:
+                data["triage"][key] = old[key]
         text = "# Saved by the ImagePipe web UI. The previous file is kept as a .bak copy.\n"
         text += yaml.safe_dump(data, sort_keys=False, allow_unicode=True, default_flow_style=False)
         return self.save_config_text(text)
@@ -276,7 +282,8 @@ class App:
     def meta(self) -> dict:
         out = {"version": __version__, "config_path": str(self.config_path),
                "config_writable": os.access(self.config_path.parent, os.W_OK), "jobs": JOBS,
-               "sources": [], "triage_sources": [], "config_error": None, "planned": None}
+               "sources": [], "triage_sources": [], "config_error": None, "planned": None,
+               "env": {FILESTACK_ENV: os.environ.get(FILESTACK_ENV, "")}}
         try:
             cfg = self.cfg()
             out["sources"] = [s.name for s in cfg.sources]

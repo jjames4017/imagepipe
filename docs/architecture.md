@@ -2,7 +2,7 @@
 
 ## The funnel
 
-Files enter at the inbox and move through twelve stages. Each stage can take a
+Files enter from triage's `sorted/images` and `sorted/raw` folders and move through twelve stages. Each stage can take a
 file out of the flow into an [excluded folder](excluded-reasons.md). Whatever
 reaches the library is registered in the manifest, and the next drop is checked
 against all of it.
@@ -44,20 +44,35 @@ flowchart LR
 
 ## Folder layout
 
-The working folders sit in **one dataset** so every move between stages is an
-instant rename, not a copy:
+Decided 27 Nov 2026 (the ImagePipe folders are built in phase 2). Everything
+still being worked on, and everything that isn't a finished photo, lives in the
+**filestack** on bulk storage (`IMAGEPIPE_FILESTACK`, one mount with the
+triage sources, so every move is an instant rename). Only finished photos go to
+the library on fast storage.
 
 ```text
-photostage/               one ZFS dataset (plain folders, not child datasets)
-├── inbox/                stage 1
-├── work/                 stages 2-11, one subfolder per stage
-├── excluded-hold/        exclusions wait here...
-└── library/              ...the finished library PhotoPrism and Immich index
+<filestack>/                      e.g. /wolf-pool/vault/filestack
+├── triage/work/                  triage extracts archives here
+├── imagepipe/
+│   ├── processing/<batch>/       stages 2-8 (the stage is tracked in the manifest, not by folder)
+│   ├── a-eye/<batch>/            the only folder A-Eye sees
+│   ├── digikam/<batch>/          the only folder digiKam sees
+│   └── ready/<batch>/            checked, waiting to be copied to the library
+└── sorted/
+    ├── images/ raw/              triage output that ImagePipe picks up
+    ├── documents/ video/ ...     other categories (final, or another pipeline's)
+    ├── raw-processed/            RAW originals after their working copy was made
+    ├── quarantine/<reason>/
+    └── excluded/<reason>/        photos ImagePipe took out of the flow
+
+<library dataset>/                e.g. /mnt/appdata/imagelibrary (NVMe)
+├── library/YYYY/YYYY-MM/         finished photos only (+ undated/) - PhotoPrism and Immich read this
+└── imagepipe/                    manifest, triage database, logs, reports
 ```
 
-`excluded-hold/` is drained continuously to the long-term `/excluded/` folder on
-bulk storage, with copy → verify checksum → remove, so no file can be lost in
-transit.
+A batch is one calendar month of photos (by date taken), split above 2,000.
+The finished photo is copied to the library with copy -> verify checksum ->
+remove.
 
 ## Components
 
