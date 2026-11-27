@@ -440,7 +440,15 @@ don't count.
 | can't be read (the PDF reader fails, or it has no pages) | `sorted/quarantine/pdf-uncertain/` (listed as unreadable) |
 
 **Splitting.** Each run makes its own ScanSplitter project
-("ImagePipe PDF check <date> <time>") and uploads the photo PDFs into it.
+("ImagePipe PDF check <date> <time>") and uploads the photo PDFs into it. A
+project holds at most **Most PDFs per project** photo PDFs (default 200); the
+run then starts the next one ("... (2)"). Every project gets the ScanSplitter
+settings from Settings > External tools > ScanSplitter (detection mode, album
+layout, smallest/largest photo, auto-rotate, edge cleanup, auto-deskew, restore
+colour, 2x upscale, format, JPEG quality, GPS); projects made earlier get them
+before ImagePipe exports from them. Defaults: scansplitterv7, auto, 2 % / 100 %,
+auto-rotate on, tight, deskew/restore/upscale on, JPEG 100, no GPS. No archive
+bundle, processed master, album folders or manifest is ever asked for.
 Pages ScanSplitter raised no CHECK flag for are approved by ImagePipe and their
 photos exported straight away to `sorted/images/` (same folders as the PDF,
 named `<PDF name>_p<page>_<n>.jpg`). Pages with a CHECK flag wait for you in

@@ -126,6 +126,10 @@ class PdfChecker:
         self.run_id = None
         self.ss: ScanSplitter | None = None
         self.project: str | None = None
+        self.projects: list[str] = []      # made by this run
+        self.project_pdfs = 0              # photo PDFs kept in the current project
+        self.settings_sent: set[str] = set()
+        self.ss_cfg = cfg.tools.scansplitter if cfg.tools else None
         self.stats: dict[str, int] = {}
 
     # helpers
@@ -176,11 +180,25 @@ class PdfChecker:
         return self.ss
 
     def run_project(self) -> str:
-        if self.project is None:
+        """This run's current project; a new one once it holds max_pdfs_per_project photo PDFs."""
+        limit = self.ss_cfg.max_pdfs_per_project if self.ss_cfg else 200
+        if self.project is None or self.project_pdfs >= limit:
             name = f"ImagePipe PDF check {datetime.now(self.cfg.tz):%Y-%m-%d %H:%M}"
+            if self.projects:
+                name += f" ({len(self.projects) + 1})"
             self.project = self.scansplitter().create_project(name)
-            say(f"ScanSplitter project for this run: '{name}' ({self.project})")
+            self.projects.append(self.project)
+            self.project_pdfs = 0
+            self.send_settings(self.project)
+            say(f"ScanSplitter project: '{name}' ({self.project}), up to {limit:,} photo PDFs")
         return self.project
+
+    def send_settings(self, pid: str) -> None:
+        """Give a project the ScanSplitter settings from Settings > External tools (once per run)."""
+        if pid in self.settings_sent or self.ss_cfg is None:
+            return
+        self.scansplitter().update_settings(pid, self.ss_cfg.project_settings())
+        self.settings_sent.add(pid)
 
     # phase 1: PDFs waiting for review in ScanSplitter
     def follow_up(self) -> None:
@@ -222,6 +240,12 @@ class PdfChecker:
         pid = row["ss_project"]
         scans = json.loads(row["ss_scans"] or "[]")
         ss = self.scansplitter()
+        if any(not s.get("exported") for s in scans):
+            try:
+                self.send_settings(pid)
+            except ScanSplitterError as exc:
+                if "HTTP 404" not in str(exc):
+                    raise
         try:
             live = {s["id"]: s for s in ss.project(pid).get("scans", [])}
         except ScanSplitterError as exc:
@@ -356,6 +380,8 @@ class PdfChecker:
             p["verdict"] = page_verdict(p["boxes"], failed)
         verdict = pdf_verdict(pages)
         self.bump(f"verdict:{verdict}")
+        if verdict == "photo-pages":
+            self.project_pdfs += 1
         if verdict != "photo-pages":
             for s in scans.values():  # not a photo PDF: take its pages out of the review list again
                 try:
@@ -464,15 +490,14 @@ class PdfChecker:
         return {"status": status, "stats": dict(self.stats)}
 
     def tidy_project(self) -> None:
-        """Delete this run's ScanSplitter project if no PDF in it is waiting for review."""
-        if self.project is None:
-            return
-        try:
-            if self.ss is not None and not self.ss.project(self.project).get("scans"):
-                self.ss.delete_project(self.project)
-                say("This run's ScanSplitter project was left empty, so it was deleted.")
-        except ScanSplitterError:
-            pass
+        """Delete this run's ScanSplitter projects that have nothing waiting for review."""
+        for pid in self.projects:
+            try:
+                if self.ss is not None and not self.ss.project(pid).get("scans"):
+                    self.ss.delete_project(pid)
+                    say(f"ScanSplitter project {pid} was left empty, so it was deleted.")
+            except ScanSplitterError:
+                pass
 
 
 def summary(pages: list[dict]) -> str:

@@ -31,6 +31,78 @@ TIMEOUT = 8
 @dataclass
 class ScanSplitterTool:
     url: str = ""
+    # Settings every ImagePipe-made project gets (ScanSplitter's own names in brackets)
+    detection_mode: str = "scansplitterv7"   # [detection_mode]
+    album_layout: str = "auto"               # [album_layout]
+    min_area: int = 2                        # smallest photo, % of the page [min_area_ratio]
+    max_area: int = 100                      # largest photo, % of the page [max_area_ratio]
+    auto_rotate: bool = True
+    edge_cleanup: str = "tight"              # [edge_cleanup_mode]
+    auto_deskew: bool = True
+    restore_color: bool = True
+    upscale_2x: bool = True
+    format: str = "jpeg"
+    quality: int = 100
+    include_gps: bool = False
+    max_pdfs_per_project: int = 200          # a run starts a new project when one holds this many photo PDFs
+
+    def project_settings(self) -> dict:
+        """The settings dict for ScanSplitter's PATCH /api/projects/{pid}."""
+        return {"detection_mode": self.detection_mode, "album_layout": self.album_layout,
+                "min_area_ratio": float(self.min_area), "max_area_ratio": float(self.max_area),
+                "auto_rotate": self.auto_rotate, "edge_cleanup_mode": self.edge_cleanup,
+                "auto_deskew": self.auto_deskew, "restore_color": self.restore_color, "upscale_2x": self.upscale_2x,
+                "format": self.format, "quality": self.quality, "include_gps": self.include_gps,
+                "master_format": None, "organize_folders": False, "manifest_format": None}
+
+
+SS_DETECTION = ("scansplitterv7", "scansplitterv5", "scansplitterv4", "scansplitterv3", "album-splitter", "openrouter")
+SS_LAYOUT = ("auto", "single", "spread")
+SS_EDGE = ("off", "conservative", "tight")
+SS_FORMAT = ("jpeg", "png")
+
+
+def _bool(name: str, v) -> bool:
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    if s in ("true", "yes", "on", "1"):
+        return True
+    if s in ("false", "no", "off", "0"):
+        return False
+    raise ConfigError(f"tools.scansplitter.{name} must be true or false (got '{v}')")
+
+
+def _parse_scansplitter(raw: dict) -> ScanSplitterTool:
+    d = ScanSplitterTool()
+    out = {}
+    for f in fields(ScanSplitterTool):
+        v = raw.get(f.name)
+        if v is None or v == "":
+            out[f.name] = getattr(d, f.name)
+            continue
+        if f.type == "bool" or isinstance(getattr(d, f.name), bool):
+            out[f.name] = _bool(f.name, v)
+        elif isinstance(getattr(d, f.name), int):
+            try:
+                out[f.name] = int(v)
+            except (TypeError, ValueError):
+                raise ConfigError(f"tools.scansplitter.{f.name} must be a whole number (got '{v}')") from None
+        else:
+            out[f.name] = str(v).strip()
+    t = ScanSplitterTool(**out)
+    for name, allowed in (("detection_mode", SS_DETECTION), ("album_layout", SS_LAYOUT),
+                          ("edge_cleanup", SS_EDGE), ("format", SS_FORMAT)):
+        if getattr(t, name) not in allowed:
+            raise ConfigError(f"tools.scansplitter.{name} must be one of: {', '.join(allowed)}")
+    if not (0 < t.min_area < t.max_area <= 100):
+        raise ConfigError("tools.scansplitter: smallest photo must be above 0 and below the largest, "
+                          "and the largest at most 100 (% of the page)")
+    if not 1 <= t.quality <= 100:
+        raise ConfigError("tools.scansplitter.quality must be from 1 to 100")
+    if t.max_pdfs_per_project < 1:
+        raise ConfigError("tools.scansplitter.max_pdfs_per_project must be at least 1")
+    return t
 
 
 @dataclass
@@ -97,10 +169,13 @@ def parse_tools(data) -> ToolsConfig:
         if bad:
             raise ConfigError(f"Unknown key(s) in 'tools.{name}': {', '.join(sorted(bad))} "
                               f"(known: {', '.join(sorted(allowed))})")
-        values = {k: "" if raw.get(k) is None else str(raw.get(k)).strip() for k in allowed}
-        url = values.get("url", "")
+        url = "" if raw.get("url") is None else str(raw.get("url")).strip()
         if url and not url.startswith(("http://", "https://")):
             raise ConfigError(f"tools.{name}.url must start with http:// or https:// (got '{url}')")
+        if cls is ScanSplitterTool:
+            setattr(out, name, _parse_scansplitter({**raw, "url": url}))
+            continue
+        values = {k: "" if raw.get(k) is None else str(raw.get(k)).strip() for k in allowed}
         setattr(out, name, cls(**values))
     return out
 

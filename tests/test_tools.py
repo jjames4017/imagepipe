@@ -131,3 +131,17 @@ def test_parse_tools_login_fields():
     t = parse_tools({"a_eye": {"url": "http://h:8000", "username": "u", "password": "p"},
                      "digikam": {"url": "https://h:3011", "username": "d", "password": "q"}})
     assert (t.a_eye.username, t.a_eye.password, t.digikam.username) == ("u", "p", "d")
+
+
+def test_scansplitter_settings_parse():
+    import pytest as _pt
+
+    from imagepipe.config import ConfigError
+
+    t = parse_tools({"scansplitter": {"url": "http://h:8010", "min_area": "3", "upscale_2x": "false",
+                                      "max_pdfs_per_project": 50}})
+    s = t.scansplitter
+    assert (s.min_area, s.upscale_2x, s.max_pdfs_per_project, s.quality) == (3, False, 50, 100)
+    for bad in ({"min_area": 0}, {"min_area": 100, "max_area": 100}, {"detection_mode": "v9"}, {"quality": 0}):
+        with _pt.raises(ConfigError):
+            parse_tools({"scansplitter": bad})
