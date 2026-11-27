@@ -81,7 +81,10 @@ def build_argv(job: str, opts: dict) -> list[str]:
     if job == "triage-export-csv":
         return ["triage", "export-csv"]
     if job == "triage-check-pdfs":
-        return ["triage", "check-pdfs"]
+        limit = str(opts.get("limit") or "").strip()
+        if limit and not (limit.isdigit() and int(limit) > 0):
+            raise ValueError("Limit must be a whole number above 0")
+        return ["triage", "check-pdfs"] + (["--limit", limit] if limit else [])
     batch = str(opts.get("batch") or "").strip()
     if batch and not all(c.isalnum() or c == "-" for c in batch):
         raise ValueError("A batch name has only letters, digits and hyphens, e.g. 2015-06 or undated-001")

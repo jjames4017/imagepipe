@@ -62,7 +62,7 @@ folder named after the source:
 | `imagepipe triage apply [--limit N]` | Carries out the plan | **Yes - moves files** |
 | `imagepipe triage status` | Counts by status and bucket, recent runs | No |
 | `imagepipe triage export-csv` | Every file in the triage database, one CSV | No |
-| `imagepipe triage check-pdfs` | Sorts the PDFs in `sorted/documents` - see [Check PDFs](#check-pdfs) | **Yes - moves PDFs, writes photos** |
+| `imagepipe triage check-pdfs [--limit N]` | Sorts the PDFs in `sorted/documents` - see [Check PDFs](#check-pdfs) | **Yes - moves PDFs, writes photos** |
 | `imagepipe triage relocate [--dry-run]` | Moves files sorted before 0.4 from the old folders into the filestack | **Yes - moves files** |
 
 Run them in the foreground (`docker compose run --rm imagepipe triage ...`) so
@@ -422,7 +422,9 @@ without it.
 separate from scan, plan and apply, with its own progress, Pause and Stop. Each
 run checks every PDF in `<filestack>/sorted/documents/` it hasn't checked yet
 (the first run covers everything already sorted; later runs only new or changed
-PDFs), and follows up PDFs waiting for review.
+PDFs), and follows up PDFs waiting for review. `--limit N` (Run tab: the
+**limit** box) checks at most N new PDFs, for a trial run; the next run carries
+on with the rest. PDFs waiting for review are always followed up.
 
 Each page is read for text - its text layer, and Tesseract OCR when the text
 layer has little - and, if it holds any image, sent to ScanSplitter to find

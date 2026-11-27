@@ -108,7 +108,8 @@
         <p class="sub">Checks every PDF in sorted/documents not checked yet: documents stay, photo scans are split by
           ScanSplitter into sorted/images (pages with a CHECK flag wait for you in ScanSplitter's Projects page and are
           picked up next run), uncertain ones go to sorted/quarantine/pdf-uncertain.</p>
-        <div class="row"><button class="b" data-job="triage-check-pdfs">Check PDFs</button></div>
+        <div class="row"><button class="b" data-job="triage-check-pdfs">Check PDFs</button>
+          <span class="muted">limit</span><input type="number" id="pdf-limit" min="1" placeholder="all" style="width:110px"></div>
       </div>
       <div class="card">
         <h2>Catalogue</h2>
@@ -291,6 +292,7 @@ $$("[data-job]").forEach(b => b.onclick = async () => {
   if (["catalogue", "report", "export-csv"].includes(kind)) options.source = $("#c-source").value;
   if (kind === "catalogue") options.retry_errors = $("#c-retry").checked;
   if (kind.startsWith("phase2")) options.batch = $("#p2-batch").value;
+  if (kind === "triage-check-pdfs") options.limit = $("#pdf-limit").value;
   if (kind === "phase2-run" && !confirm("Run phase 2 on " + (options.batch || "the next waiting batch") +
       "?\n\nIt MOVES that batch's photos from sorted/ into imagepipe/processing/, writes the ID into each kept file " +
       "(a checked copy is swapped in; RAW files get a sidecar), and moves exact duplicates and photos that don't decode " +

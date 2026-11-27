@@ -257,6 +257,9 @@ def test_phase2_and_pdf_jobs_argv():
     from imagepipe.web.server import build_argv
 
     assert build_argv("triage-check-pdfs", {}) == ["triage", "check-pdfs"]
+    assert build_argv("triage-check-pdfs", {"limit": "20"}) == ["triage", "check-pdfs", "--limit", "20"]
+    with pytest.raises(ValueError):
+        build_argv("triage-check-pdfs", {"limit": "0"})
     assert build_argv("phase2-find", {}) == ["phase2", "run", "--find-only"]
     assert build_argv("phase2-run", {"batch": "2015-06"}) == ["phase2", "run", "--batch", "2015-06"]
     assert build_argv("phase2-ready-check", {}) == ["phase2", "ready-check"]
