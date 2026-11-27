@@ -67,7 +67,21 @@ triage:
 # Edit in the web UI (Settings -> External tools), where each has a Test button.
 # Passwords and keys are saved here in plain text; keep this file's folder private.
 # tools:
-#   scansplitter: {url: http://<host>:8010}
+#   scansplitter:
+#     url: http://<host>:8010
+#     detection_mode: scansplitterv7    # scansplitterv7/v5/v4/v3, album-splitter, openrouter
+#     album_layout: auto                # auto, single, spread
+#     min_area: 2                       # smallest photo, % of the page (above 0)
+#     max_area: 100                     # largest photo, % of the page
+#     auto_rotate: true
+#     edge_cleanup: tight               # off, conservative, tight
+#     auto_deskew: true
+#     restore_color: true
+#     upscale_2x: true
+#     format: jpeg                      # jpeg, png
+#     quality: 100
+#     include_gps: false
+#     max_pdfs_per_project: 200
 #   photoprism:   {url: http://<host>:2342, username: admin, password: ""}
 #   immich:       {url: http://<host>:2283, api_key: ""}
 #   a_eye:        {url: http://<host>:8000, username: "", password: ""}
