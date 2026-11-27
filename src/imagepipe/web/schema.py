@@ -77,6 +77,12 @@ TRIAGE = [
     {"key": "max_archive_depth", "type": "int", "label": "Archives inside archives, depth", "default": 5},
     {"key": "max_extract_bytes", "type": "size", "label": "Largest unpacked archive", "default": "200GB"},
     {"key": "smartname_max_length", "type": "int", "label": "Smartname length", "default": 80},
+    {"key": "pdf_photo_coverage", "type": "int", "label": "PDF check: photo page coverage (%)", "default": 60,
+     "help": "Triage: check PDFs. A page is a photo page when ScanSplitter's photos cover at least this much of "
+             "it and it has little text"},
+    {"key": "pdf_text_chars", "type": "int", "label": "PDF check: little text (characters)", "default": 50,
+     "help": "Fewer letters and digits than this on a page (text layer, or OCR when there is no text layer) "
+             "counts as little or no text; this many or more is substantial text"},
 ]
 
 TOOLS = [
@@ -93,11 +99,28 @@ TOOLS = [
      "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:2283"},
                 {"key": "api_key", "type": "secret", "label": "API key"}]},
     {"key": "a_eye", "type": "group", "label": "A-Eye", "test": True,
-     "help": "Test opens the web page",
-     "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:8000"}]},
+     "help": "Test calls /api/health and, with a username and password, signs in to /api/watch/status "
+             "(reads only)",
+     "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:8000"},
+                {"key": "username", "type": "str", "label": "Username"},
+                {"key": "password", "type": "secret", "label": "Password"}]},
     {"key": "digikam", "type": "group", "label": "digiKam", "test": True,
-     "help": "Test opens the web page",
-     "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:3011"}]},
+     "help": "Test opens the web page, signing in with the username and password (HTTP Basic) if set",
+     "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "https://<host>:3011"},
+                {"key": "username", "type": "str", "label": "Username"},
+                {"key": "password", "type": "secret", "label": "Password"}]},
+]
+
+PHASE2 = [
+    {"key": "enabled", "type": "bool", "label": "Phase 2 switched on", "default": False,
+     "help": "Off until the PhotoPrism export exists. While off, Phase 2 jobs refuse to run"},
+    {"key": "batch_size", "type": "int", "label": "Photos per batch", "default": 2000,
+     "help": "A month with more photos than this is split; undated photos go in batches this big"},
+    {"key": "burst_gap_seconds", "type": "int", "label": "Burst: seconds between shots", "default": 2,
+     "help": "Photos from one camera this close together count as one burst (flagged only)"},
+    {"key": "burst_min", "type": "int", "label": "Burst: at least this many photos", "default": 3},
+    {"key": "low_res_pixels", "type": "int", "label": "Low resolution below (long edge, pixels)", "default": 1000,
+     "help": "Flagged only; whether a bigger copy exists is checked at stage 6"},
 ]
 
 SCHEMA = [
@@ -108,4 +131,7 @@ SCHEMA = [
      "help": "Where each outside tool is. Saved in imagepipe.yml (passwords and keys too). Test checks a tool "
              "from this container, using what is typed in the form, saved or not."},
     {"section": "triage", "label": "Triage", "optional": True, "fields": TRIAGE},
+    {"section": "phase2", "label": "Phase 2", "optional": True, "fields": PHASE2,
+     "help": "Stages 1, 2 and 4: month batches into <filestack>/imagepipe/processing/, IDs written into the files, "
+             "exact duplicates out, conflicts to the Conflicts tab. Uses the triage section's filestack and categories."},
 ]

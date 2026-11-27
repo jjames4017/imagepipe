@@ -51,3 +51,20 @@ silently ignored.
 
 Notifications are off unless both `apprise_url` and `apprise_key` are set. See
 [Notifications](notifications.md).
+
+## `phase2`
+
+Optional. Phase 2 also needs the `triage` section (it uses the filestack and the
+categories whose pipeline is `imagepipe`).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Phase 2 jobs refuse to run while this is false. Stays off until the PhotoPrism export exists |
+| `batch_size` | `2000` | A month with more photos than this is split; undated photos go in batches this big |
+| `burst_gap_seconds` | `2` | Photos from one camera this close together count as one burst... |
+| `burst_min` | `3` | ...when there are at least this many (flagged only) |
+| `low_res_pixels` | `1000` | A photo whose long edge is shorter is flagged low resolution |
+
+The PDF check's two settings are in the `triage` section: `pdf_photo_coverage`
+(%, default 60) and `pdf_text_chars` (default 50) - see
+[Check PDFs](stages/triage.md#check-pdfs).

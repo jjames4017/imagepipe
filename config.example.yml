@@ -59,6 +59,8 @@ triage:
   max_archive_depth: 5                        # archives inside archives, this deep
   max_extract_bytes: 200GB                    # an archive that unpacks to more than this goes to quarantine/archive-failed
   smartname_max_length: 80
+  pdf_photo_coverage: 60                      # Check PDFs: ScanSplitter's photos must cover this % of a page for a photo page
+  pdf_text_chars: 50                          # Check PDFs: fewer letters/digits than this on a page = little or no text
   # categories:                               # leave out for the built-in list (images and raw -> imagepipe)
   #   documents: {pipeline: none, extensions: [pdf, docx, txt]}
 
@@ -69,5 +71,13 @@ triage:
 #   scansplitter: {url: http://<host>:8010}
 #   photoprism:   {url: http://<host>:2342, username: admin, password: ""}
 #   immich:       {url: http://<host>:2283, api_key: ""}
-#   a_eye:        {url: http://<host>:8000}
-#   digikam:      {url: http://<host>:3011}
+#   a_eye:        {url: http://<host>:8000, username: "", password: ""}
+#   digikam:      {url: https://<host>:3011, username: "", password: ""}
+
+# Phase 2 (stages 1, 2 and 4). Off until the PhotoPrism export exists.
+# phase2:
+#   enabled: false
+#   batch_size: 2000            # a month with more photos is split; undated photos in batches this big
+#   burst_gap_seconds: 2        # burst = photos from one camera this close together...
+#   burst_min: 3                # ...at least this many in a row (flagged only)
+#   low_res_pixels: 1000        # long edge below this is flagged low resolution

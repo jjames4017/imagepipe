@@ -124,6 +124,25 @@ CREATE TABLE IF NOT EXISTS actions (
     detail        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_actions_file ON actions (file_id);
+
+-- Triage: check PDFs (#58). One row per PDF found in sorted/documents.
+CREATE TABLE IF NOT EXISTS pdf_checks (
+    id          INTEGER PRIMARY KEY,
+    path        TEXT NOT NULL UNIQUE,   -- where the PDF was when checked
+    size        INTEGER,
+    mtime       REAL,
+    pages       INTEGER,
+    verdict     TEXT,                   -- document | photo-pages | uncertain | too-large | unreadable
+    state       TEXT NOT NULL,          -- checking | waiting-review | done | error
+    page_detail TEXT,                   -- JSON: per page text, coverage, verdict
+    ss_project  TEXT,                   -- ScanSplitter project id
+    ss_scans    TEXT,                   -- JSON: [{sid, page, exported, files}]
+    final_path  TEXT,                   -- where the PDF is now
+    note        TEXT,
+    checked_at  TEXT,
+    updated_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pdf_state ON pdf_checks (state);
 """
 
 ACTION_COLUMNS = ("ts", "run_id", "triage_id", "action", "from_path", "to_path", "rule",

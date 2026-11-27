@@ -203,6 +203,28 @@ def cmd_triage_apply(cfg, args) -> int:
     return 130
 
 
+def cmd_triage_check_pdfs(cfg, args) -> int:
+    from imagepipe.triage.pdfcheck import run_pdf_check
+
+    tc = _triage_cfg(cfg)
+    try:
+        result = run_pdf_check(cfg)
+    except Exception as exc:
+        log.exception("PDF check failed")
+        print(f"ERROR: {exc}", file=sys.stderr)
+        notify.send(cfg.notify, "error", "Triage PDF check failed", str(exc), "failure")
+        return 2
+    stats = result["stats"]
+    print("PDF check: " + (", ".join(f"{v:,} {k}" for k, v in sorted(stats.items())) or "nothing to do"))
+    print(f"Every move and export is in {tc.reports_dir / 'actions.csv'}", file=sys.stderr)
+    body = ", ".join(f"{v:,} {k}" for k, v in sorted(stats.items())) or "nothing to do"
+    if result["status"] == "finished":
+        notify.send(cfg.notify, "finished", "Triage PDF check finished", body, "success")
+        return 0
+    notify.send(cfg.notify, "error", "Triage PDF check interrupted", body, "warning")
+    return 130
+
+
 def cmd_triage_status(cfg, args) -> int:
     from imagepipe.triage.reports import status_text
 
@@ -236,6 +258,48 @@ def cmd_triage_relocate(cfg, args) -> int:
     if not args.dry_run and not res.get("error"):
         print("Next: run `imagepipe triage plan` again (files planned before used the old folders).", file=sys.stderr)
     return 1 if res.get("error") else 0
+
+
+# ---------------------------------------------------------------- phase 2
+def cmd_phase2_run(cfg, args) -> int:
+    from imagepipe.phase2.run import Phase2Error, run_phase2
+
+    if cfg.triage is not None:
+        _triage_cfg(cfg)
+    try:
+        result = run_phase2(cfg, batch=args.batch, find_only=args.find_only)
+    except Phase2Error as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:
+        log.exception("Phase 2 failed")
+        notify.send(cfg.notify, "error", "ImagePipe phase 2 failed", repr(exc), "failure")
+        raise
+    stats = result["stats"]
+    body = f"Batch {result['batch'] or '(none)'}: " + (", ".join(f"{v:,} {k}" for k, v in sorted(stats.items()))
+                                                      or "nothing to do")
+    print(body)
+    if result["status"] == "finished":
+        notify.send(cfg.notify, "finished", "ImagePipe phase 2 finished", body, "success")
+        return 0
+    notify.send(cfg.notify, "error", "ImagePipe phase 2 interrupted", body, "warning")
+    return 130
+
+
+def cmd_phase2_status(cfg, args) -> int:
+    from imagepipe.phase2.run import status_text
+
+    print(status_text(cfg))
+    return 0
+
+
+def cmd_phase2_ready(cfg, args) -> int:
+    from imagepipe.phase2.checks import ready_check
+
+    res = ready_check(cfg, args.batch)
+    print(f"{res['checked']:,} checked: {res['ready']:,} ready, {res['not_ready']:,} not ready")
+    print(f"Report: {res['report']}", file=sys.stderr)
+    return 0
 
 
 def cmd_layered_find(cfg, args) -> int:
@@ -359,6 +423,9 @@ def build_parser() -> argparse.ArgumentParser:
     ta = tsub.add_parser("apply", help="carry out the plan: move, extract archives, write tags")
     ta.add_argument("--limit", type=int, help="stop after this many files/archives (for a trial run)")
     ta.set_defaults(func=cmd_triage_apply)
+    tc_ = tsub.add_parser("check-pdfs", help="sort the PDFs in sorted/documents into documents, photo scans "
+                          "(split by ScanSplitter) and uncertain")
+    tc_.set_defaults(func=cmd_triage_check_pdfs)
     tst = tsub.add_parser("status", help="counts by status and bucket, recent runs")
     tst.set_defaults(func=cmd_triage_status)
     tr = tsub.add_parser("relocate", help="move already-sorted files from the old folders (before 0.4) into the filestack")
@@ -367,6 +434,18 @@ def build_parser() -> argparse.ArgumentParser:
     te = tsub.add_parser("export-csv", help="write every file in the triage database to one CSV")
     te.add_argument("--output")
     te.set_defaults(func=cmd_triage_export)
+
+    p2 = sub.add_parser("phase2", help="stages 1, 2 and 4: month batches, IDs, exact duplicates, conflicts")
+    p2sub = p2.add_subparsers(dest="phase2_command", required=True)
+    pr = p2sub.add_parser("run", help="find new photos, make batches, and take one batch through stages 1, 2 and 4")
+    pr.add_argument("--batch", help="this batch (default: the one in progress, else the oldest waiting)")
+    pr.add_argument("--find-only", action="store_true", help="only find photos and make batches; move nothing")
+    pr.set_defaults(func=cmd_phase2_run)
+    ps = p2sub.add_parser("status", help="batches, photos by status, conflicts waiting")
+    ps.set_defaults(func=cmd_phase2_status)
+    prc = p2sub.add_parser("ready-check", help="what each processed photo still needs before the library")
+    prc.add_argument("--batch", help="one batch (default: all)")
+    prc.set_defaults(func=cmd_phase2_ready)
 
     lay = sub.add_parser("layered", help="layered TIFFs and Photoshop files: review list, working copies")
     lsub = lay.add_subparsers(dest="layered_command", required=True)

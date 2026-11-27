@@ -7,8 +7,8 @@ system):
       scansplitter: {url: http://host:8010}
       photoprism:   {url: http://host:2342, username: admin, password: ...}
       immich:       {url: http://host:2283, api_key: ...}
-      a_eye:        {url: http://host:8000}
-      digikam:      {url: http://host:3011}
+      a_eye:        {url: http://host:8000, username: ..., password: ...}
+      digikam:      {url: https://host:3011, username: ..., password: ...}
 
 check(tool, values) is what the web UI's Test buttons call. It never changes anything in
 the tool: it reads a health/status page and, where a login is given, checks the login.
@@ -16,6 +16,7 @@ the tool: it reads a health/status page and, where a login is given, checks the 
 
 from __future__ import annotations
 
+import base64
 import json
 import ssl
 import urllib.error
@@ -48,11 +49,15 @@ class ImmichTool:
 @dataclass
 class AEyeTool:
     url: str = ""
+    username: str = ""
+    password: str = ""
 
 
 @dataclass
 class DigikamTool:
     url: str = ""
+    username: str = ""
+    password: str = ""
 
 
 TOOL_CLASSES = {
@@ -110,6 +115,12 @@ def _request(url: str, method: str = "GET", body: dict | None = None, headers: d
     ctx.verify_mode = ssl.CERT_NONE
     with urllib.request.urlopen(req, timeout=TIMEOUT, context=ctx) as resp:
         return resp.status, resp.read(65536)
+
+
+def basic_auth(user: str, password: str) -> dict:
+    """The Authorization header for HTTP Basic sign-in."""
+    token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+    return {"Authorization": f"Basic {token}"}
 
 
 def _json(raw: bytes):
@@ -180,8 +191,31 @@ def check(tool: str, values: dict) -> dict:
                     return {"ok": False, "message": "Immich answered, but the API key was refused"}
                 raise
             return {"ok": True, "message": "Immich answered and the API key works"}
-        # A-Eye and digiKam: the web page answering is the check
-        status, _raw = _request(url)
-        return {"ok": 200 <= status < 400, "message": f"Answered with HTTP {status}"}
+        user, pw = str(values.get("username") or ""), str(values.get("password") or "")
+        if tool == "a_eye":
+            status, raw = _request(f"{url}/api/health")  # needs no login
+            if status != 200:
+                return {"ok": False, "message": f"Unexpected answer from /api/health: HTTP {status}"}
+            if not (user and pw):
+                return {"ok": True, "message": "A-Eye answered (no login set, so the login wasn't checked)"}
+            try:  # a page that needs the login and changes nothing
+                _request(f"{url}/api/watch/status", headers=basic_auth(user, pw))
+            except urllib.error.HTTPError as exc:
+                if exc.code in (401, 403):
+                    return {"ok": False, "message": "A-Eye answered, but the username or password was refused"}
+                raise
+            return {"ok": True, "message": f"A-Eye answered and the login for '{user}' works"}
+        # digiKam (web desktop): the page itself asks for the login (HTTP Basic)
+        try:
+            status, _raw = _request(url, headers=basic_auth(user, pw) if (user and pw) else None)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                if user and pw:
+                    return {"ok": False, "message": "digiKam answered, but the username or password was refused"}
+                return {"ok": False, "message": "digiKam answered and asks for a login - set the username and password"}
+            raise
+        if user and pw:
+            return {"ok": 200 <= status < 400, "message": f"digiKam answered (HTTP {status}) and the login for '{user}' works"}
+        return {"ok": 200 <= status < 400, "message": f"digiKam answered with HTTP {status} (no login needed)"}
     except Exception as exc:  # noqa: BLE001 - report any failure to the page
         return {"ok": False, "message": _why(exc)}

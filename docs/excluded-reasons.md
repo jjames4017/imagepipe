@@ -30,7 +30,7 @@ Not excluded (decided 27 Nov 2026):
 
 ## The CSV log
 
-One file, appended one row per excluded file:
+One file, `<reports_dir>/excluded.csv`, appended one row per excluded file:
 
 | Column | Meaning |
 |---|---|

@@ -99,6 +99,11 @@ def status_text(cfg: Config) -> str:
         if rows:
             lines.append("Planned or done, by bucket:")
             lines += [f"  {b:<28} {n:>12,}" for b, n in rows]
+        rows = t.db.execute("SELECT verdict, state, COUNT(*) FROM pdf_checks GROUP BY verdict, state "
+                            "ORDER BY verdict, state").fetchall()
+        if rows:
+            lines.append("PDF check (verdict / state):")
+            lines += [f"  {v or '-':<12} {st:<15} {n:>10,}" for v, st, n in rows]
         lines.append("Recent runs:")
         for r in t.db.execute("SELECT id, mode, source, started_at, finished_at, status FROM runs "
                               "ORDER BY id DESC LIMIT 5"):

@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -91,6 +91,69 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_file ON events (file_id);
 """
 
+# Version 2 (phase 2): batches, copies, conflicts and flags, and phase-2 columns on files.
+PHASE2_COLUMNS = {
+    "category": "TEXT",        # sorted/<category> the file came from
+    "batch": "TEXT",           # processing/<batch>
+    "pixel_hash": "TEXT",      # SHA-256 of the decoded pixels
+    "date_source": "TEXT",     # where date_taken came from: exif | takeout
+    "undated": "INTEGER",      # 1 = no date anywhere; batched as undated-NNN
+    "gps_lat": "REAL",
+    "gps_lon": "REAL",
+    "orientation": "INTEGER",
+    "takeout_json": "TEXT",    # the Google Takeout .json read for this file
+    "takeout": "TEXT",         # JSON: what the Takeout file said (date, gps)
+    "id_source": "TEXT",       # name | metadata | new
+    "sha256_written": "TEXT",  # SHA-256 after ImagePipe last wrote into the file (sha256 stays the original)
+}
+
+SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS batches (
+    name       TEXT PRIMARY KEY,       -- YYYY-MM[-n] or undated-NNN
+    month      TEXT,                   -- YYYY-MM, NULL for undated
+    status     TEXT NOT NULL,          -- planned | processing | processed
+    files      INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS copies (     -- every place a photo (or a duplicate of it) came from
+    id            INTEGER PRIMARY KEY,
+    file_id       INTEGER NOT NULL,
+    original_path TEXT NOT NULL,
+    role          TEXT NOT NULL,       -- original | duplicate
+    dup_file_id   INTEGER,
+    created_at    TEXT,
+    UNIQUE (file_id, original_path)
+);
+CREATE INDEX IF NOT EXISTS idx_copies_file ON copies (file_id);
+
+CREATE TABLE IF NOT EXISTS conflicts (
+    id          INTEGER PRIMARY KEY,
+    file_id     INTEGER NOT NULL,      -- the kept file the chosen value is written into
+    field       TEXT NOT NULL,         -- date | gps
+    signature   TEXT NOT NULL,         -- conflicts with the same signature are "similar"
+    candidates  TEXT NOT NULL,         -- JSON list: {key, source, value, ..., file_id}
+    recommended TEXT,                  -- JSON: {value, ..., why, confidence}
+    status      TEXT NOT NULL,         -- pending | resolved
+    chosen      TEXT,                  -- JSON: the value written
+    created_at  TEXT,
+    resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_conflicts_status ON conflicts (status, signature);
+CREATE INDEX IF NOT EXISTS idx_conflicts_file ON conflicts (file_id);
+
+CREATE TABLE IF NOT EXISTS flags (
+    id         INTEGER PRIMARY KEY,
+    file_id    INTEGER NOT NULL,
+    flag       TEXT NOT NULL,          -- burst | low-res | orientation | reentry-changed | ...
+    detail     TEXT,
+    created_at TEXT,
+    UNIQUE (file_id, flag)
+);
+CREATE INDEX IF NOT EXISTS idx_flags_flag ON flags (flag);
+"""
+
 CATALOGUE_COLUMNS = (
     "top_folder", "size", "mtime", "ext", "kind", "mime", "ext_mismatch", "sha256",
     "width", "height", "has_exif", "camera_make", "camera_model", "date_taken",
@@ -118,13 +181,20 @@ class Manifest:
     def _init_schema(self) -> None:
         self.db.executescript(SCHEMA)
         row = self.db.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
-        if row is None:
-            self.db.execute("INSERT INTO meta (key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
-            self.db.commit()
-        elif int(row[0]) > SCHEMA_VERSION:
+        if row is not None and int(row[0]) > SCHEMA_VERSION:
             raise RuntimeError(
                 f"Manifest schema version {row[0]} is newer than this ImagePipe ({SCHEMA_VERSION}). Upgrade ImagePipe."
             )
+        # version 1 -> 2: only adds tables and columns, nothing is changed or removed
+        have = {r[1] for r in self.db.execute("PRAGMA table_info(files)")}
+        for col, kind in PHASE2_COLUMNS.items():
+            if col not in have:
+                self.db.execute(f"ALTER TABLE files ADD COLUMN {col} {kind}")
+        self.db.executescript(SCHEMA_V2)
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_files_batch ON files (batch, status)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_files_pixel ON files (pixel_hash)")
+        self.db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+        self.db.commit()
 
     def now(self) -> str:
         return datetime.now(self.tz).isoformat(timespec="seconds")

@@ -56,6 +56,11 @@
   .msg.on { display:block; } .msg.err { background:rgba(180,71,26,.12); color:var(--warn); } .msg.good { background:rgba(34,122,75,.12); color:var(--ok); }
   .scroll { max-height:560px; overflow:auto; border:1px solid var(--line); border-radius:8px; }
   .pager { display:flex; gap:8px; align-items:center; margin-top:8px; }
+  .conf { border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:12px; }
+  .conf .thumbs { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0; }
+  .conf .thumbs figure { margin:0; font-size:11px; color:var(--muted); text-align:center; }
+  .conf .thumbs img { max-width:180px; max-height:180px; border:1px solid var(--line); border-radius:6px; display:block; }
+  .conf table td { vertical-align:middle; } .conf tr.recrow td { background:rgba(47,91,211,.08); }
   a { color:var(--accent); }
 </style>
 </head>
@@ -67,6 +72,7 @@
     <button data-tab="status">Status</button>
     <button data-tab="plan">Plan review</button>
     <button data-tab="actions">Actions</button>
+    <button data-tab="conflicts">Conflicts <span id="conf-count" class="pill" hidden></span></button>
     <button data-tab="reports">Reports</button>
     <button data-tab="settings">Settings</button>
   </nav>
@@ -98,6 +104,11 @@
           <span class="muted">limit</span><input type="number" id="t-limit" min="1" placeholder="all" style="width:110px">
         </div>
         <div class="row muted" id="planned"></div>
+        <h2 style="margin-top:16px">PDFs</h2>
+        <p class="sub">Checks every PDF in sorted/documents not checked yet: documents stay, photo scans are split by
+          ScanSplitter into sorted/images (pages with a CHECK flag wait for you in ScanSplitter's Projects page and are
+          picked up next run), uncertain ones go to sorted/quarantine/pdf-uncertain.</p>
+        <div class="row"><button class="b" data-job="triage-check-pdfs">Check PDFs</button></div>
       </div>
       <div class="card">
         <h2>Catalogue</h2>
@@ -108,6 +119,14 @@
           <button class="b" data-job="catalogue">Catalogue</button>
           <button class="b" data-job="report">Rebuild reports</button>
           <button class="b" data-job="export-csv">Export CSV</button>
+        </div>
+        <h2 style="margin-top:16px">Phase 2</h2>
+        <p class="sub" id="p2-state"></p>
+        <div class="row"><span class="muted">Batch</span><input type="text" id="p2-batch" placeholder="next waiting" style="width:150px;min-width:150px"></div>
+        <div class="row">
+          <button class="b" data-job="phase2-find">Find photos, make batches</button>
+          <button class="b danger" data-job="phase2-run">Run batch - moves files</button>
+          <button class="b" data-job="phase2-ready-check">Ready check</button>
         </div>
         <h2 style="margin-top:16px">Notifications</h2>
         <div class="row"><button class="b" data-job="notify-test">Send test notification</button></div>
@@ -172,6 +191,23 @@
     </div>
   </section>
 
+  <!-- CONFLICTS -->
+  <section class="tab" id="tab-conflicts">
+    <div class="card">
+      <h2>Conflicts</h2>
+      <p class="sub">Dates and locations that disagree between copies of a photo, or between a photo and its Google
+        Takeout file. Nothing is written for that field until you pick a value; the photo waits as pending meanwhile.
+        A location recommendation is only ever a suggestion.</p>
+      <div class="row">
+        <select id="cf-field"><option value="">dates and locations</option><option value="date">dates</option><option value="gps">locations</option></select>
+        <select id="cf-status"><option value="pending">waiting</option><option value="resolved">resolved</option></select>
+        <span class="muted" id="cf-count"></span><span class="msg" id="cf-msg"></span>
+      </div>
+      <div id="cf-list"></div>
+      <div class="pager"><button class="b" id="cf-prev">Previous</button><button class="b" id="cf-next">Next</button></div>
+    </div>
+  </section>
+
   <!-- REPORTS -->
   <section class="tab" id="tab-reports">
     <div class="card">
@@ -224,7 +260,8 @@ function showMsg(el, text, good) { el.textContent = text; el.className = "msg on
 $$("#nav button").forEach(b => b.onclick = () => {
   $$("#nav button").forEach(x => x.classList.toggle("on", x === b));
   $$("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + b.dataset.tab));
-  ({status: loadStatus, plan: () => loadPlan(0), actions: () => loadActions(0), reports: loadReports, settings: loadSettings})[b.dataset.tab]?.();
+  ({status: loadStatus, plan: () => loadPlan(0), actions: () => loadActions(0), conflicts: () => loadConflicts(0),
+    reports: loadReports, settings: loadSettings})[b.dataset.tab]?.();
 });
 
 // ---------- meta
@@ -240,6 +277,9 @@ async function loadMeta() {
     if (names.includes(cur)) sel.value = cur; };
   fill($("#t-source"), META.triage_sources, "all triage sources");
   fill($("#c-source"), META.sources, null);
+  $("#p2-state").textContent = META.phase2_enabled ? "Switched on. One batch per run: stage 1 (into processing/<batch>), stage 2 (IDs), stage 4 (exact duplicates)."
+    : "Switched off (Settings > Phase 2). It stays off until the PhotoPrism export exists.";
+  $("#conf-count").hidden = !META.conflicts_pending; $("#conf-count").textContent = META.conflicts_pending || "";
   $("#planned").textContent = META.planned ? `Planned and waiting: ${META.planned.files.toLocaleString()} files (${fmtBytes(META.planned.bytes)})` : "";
 }
 
@@ -250,6 +290,11 @@ $$("[data-job]").forEach(b => b.onclick = async () => {
   if (kind.startsWith("triage-scan")) { options.source = $("#t-source").value; options.reread = $("#t-reread").value; options.reread_ext = $("#t-reread-ext").value; }
   if (["catalogue", "report", "export-csv"].includes(kind)) options.source = $("#c-source").value;
   if (kind === "catalogue") options.retry_errors = $("#c-retry").checked;
+  if (kind.startsWith("phase2")) options.batch = $("#p2-batch").value;
+  if (kind === "phase2-run" && !confirm("Run phase 2 on " + (options.batch || "the next waiting batch") +
+      "?\n\nIt MOVES that batch's photos from sorted/ into imagepipe/processing/, writes the ID into each kept file " +
+      "(a checked copy is swapped in; RAW files get a sidecar), and moves exact duplicates and photos that don't decode " +
+      "to sorted/excluded/.")) return;
   if (kind === "triage-apply") {
     await loadMeta();
     options.limit = $("#t-limit").value;
@@ -351,6 +396,55 @@ async function loadActions(off) {
 $("#a-go").onclick = () => loadActions(0); $("#a-kind").onchange = () => loadActions(0);
 $("#a-q").onkeydown = e => { if (e.key === "Enter") loadActions(0); };
 $("#a-prev").onclick = () => loadActions(aOff - PAGE); $("#a-next").onclick = () => loadActions(aOff + PAGE);
+
+// ---------- conflicts
+let cfOff = 0; const CF_PAGE = 25;
+const valText = c => c.date ? c.date + (c.offset || "") : (c.lat !== undefined ? `${Number(c.lat).toFixed(6)}, ${Number(c.lon).toFixed(6)}` : "");
+const mapLink = c => c.lat !== undefined ? ` <a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${c.lat}&mlon=${c.lon}#map=15/${c.lat}/${c.lon}">map</a>` : "";
+async function loadConflicts(off) {
+  cfOff = Math.max(0, off);
+  const q = new URLSearchParams({field: $("#cf-field").value, status: $("#cf-status").value, offset: cfOff, limit: CF_PAGE});
+  const r = await api("/api/conflicts?" + q);
+  const p = r.pending || {};
+  $("#cf-count").textContent = `${r.total.toLocaleString()} shown - waiting: ${(p.date || 0).toLocaleString()} dates, ${(p.gps || 0).toLocaleString()} locations`;
+  $("#cf-list").innerHTML = r.rows.map(c => {
+    const ids = [...new Set([c.file_id, ...c.candidates.map(x => x.file_id).filter(Boolean)])];
+    const thumbs = ids.map(id => `<figure><img loading="lazy" src="/api/thumb?file_id=${id}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{textContent:'(no preview)'}))">
+      ${id === c.file_id ? "kept copy" : "other copy"}</figure>`).join("");
+    const rec = c.recommended;
+    const pending = c.status === "pending";
+    const btn = key => pending ? `<button class="b" data-pick="${c.id}" data-key="${esc(key)}">Use this</button>` : "";
+    const rows = c.candidates.map(x => `<tr><td>${esc(x.source)}</td><td><code>${esc(valText(x))}</code>${mapLink(x)}</td><td>${btn(x.key)}</td></tr>`).join("") +
+      (rec ? `<tr class="recrow"><td><b>Recommended</b><div class="muted">${esc(rec.why || "")}</div></td>
+        <td><code>${esc(valText(rec))}</code>${mapLink(rec)}${rec.confidence !== undefined ? ` <span class="pill">${rec.confidence}% confidence</span>` : ""}</td>
+        <td>${btn("recommended")}</td></tr>` : `<tr><td colspan="3" class="muted">No recommendation${c.field === "gps" ? " (no photos from the same camera within an hour have a location)" : ""}.</td></tr>`);
+    return `<div class="conf"><div class="row" style="justify-content:space-between">
+        <b>${c.field === "date" ? "Date / time" : "Location"} - ${esc(c.pipeline_id || "")}</b>
+        <span class="muted">batch ${esc(c.batch || "")}</span></div>
+      <div class="path muted">${esc(c.current_path || "")}</div>
+      <div class="thumbs">${thumbs}</div>
+      <table><thead><tr><th>Source</th><th>Value</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+      ${pending ? (c.similar ? `<label class="inline" style="margin-top:6px"><input type="checkbox" data-similar="${c.id}">
+        apply this choice to all ${c.similar.toLocaleString()} similar conflict(s) too</label>`
+        : `<div class="muted" style="margin-top:6px">No similar conflicts.</div>`)
+        : `<div class="ok" style="margin-top:6px">Resolved ${esc(c.resolved_at || "")}: <code>${esc(valText(c.chosen || {}))}</code></div>`}
+    </div>`;
+  }).join("") || `<p class="muted">No conflicts ${$("#cf-status").value === "pending" ? "waiting" : "resolved yet"}.</p>`;
+  $$("[data-pick]").forEach(b => b.onclick = async () => {
+    const id = Number(b.dataset.pick), similar = $(`[data-similar="${id}"]`)?.checked;
+    if (similar && !confirm("Write this choice into this photo and every similar one?")) return;
+    $$("[data-pick]").forEach(x => x.disabled = true);
+    try {
+      const res = await api("/api/conflicts/resolve", {id, choice: b.dataset.key, apply_similar: !!similar});
+      showMsg($("#cf-msg"), `Written into ${res.resolved} photo(s)` + (res.skipped ? `, ${res.skipped} skipped (no such value)` : "") +
+        (res.failed.length ? ` - ${res.failed.length} failed: ${res.failed.map(f => f.why).join("; ")}` : ""), !res.failed.length);
+    } catch (e) { showMsg($("#cf-msg"), e.message, false); }
+    loadMeta(); loadConflicts(cfOff);
+  });
+  $("#cf-prev").disabled = cfOff === 0; $("#cf-next").disabled = cfOff + CF_PAGE >= r.total;
+}
+$("#cf-field").onchange = () => loadConflicts(0); $("#cf-status").onchange = () => loadConflicts(0);
+$("#cf-prev").onclick = () => loadConflicts(cfOff - CF_PAGE); $("#cf-next").onclick = () => loadConflicts(cfOff + CF_PAGE);
 
 // ---------- reports
 async function loadReports() {

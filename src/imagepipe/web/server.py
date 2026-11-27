@@ -44,6 +44,10 @@ JOBS = {
     "triage-plan": "Triage: plan (dry run)",
     "triage-apply": "Triage: apply (moves files)",
     "triage-export-csv": "Triage: export CSV",
+    "triage-check-pdfs": "Triage: check PDFs",
+    "phase2-find": "Phase 2: find photos and make batches",
+    "phase2-run": "Phase 2: run one batch (stages 1, 2, 4)",
+    "phase2-ready-check": "Phase 2: ready check",
 }
 
 
@@ -76,6 +80,17 @@ def build_argv(job: str, opts: dict) -> list[str]:
         return ["triage", "apply"] + (["--limit", limit] if limit else [])
     if job == "triage-export-csv":
         return ["triage", "export-csv"]
+    if job == "triage-check-pdfs":
+        return ["triage", "check-pdfs"]
+    batch = str(opts.get("batch") or "").strip()
+    if batch and not all(c.isalnum() or c == "-" for c in batch):
+        raise ValueError("A batch name has only letters, digits and hyphens, e.g. 2015-06 or undated-001")
+    if job == "phase2-find":
+        return ["phase2", "run", "--find-only"]
+    if job == "phase2-run":
+        return ["phase2", "run"] + (["--batch", batch] if batch else [])
+    if job == "phase2-ready-check":
+        return ["phase2", "ready-check"] + (["--batch", batch] if batch else [])
     raise ValueError(f"Unknown job '{job}'")
 
 
@@ -287,6 +302,8 @@ class App:
         try:
             cfg = self.cfg()
             out["sources"] = [s.name for s in cfg.sources]
+            out["phase2_enabled"] = bool(cfg.phase2 and cfg.phase2.enabled)
+            out["conflicts_pending"] = self.conflicts_pending()
             if cfg.triage:
                 out["triage_sources"] = [s.name for s in cfg.triage.sources]
                 db = self._triage_db()
@@ -299,9 +316,89 @@ class App:
             out["config_error"] = str(exc)
         return out
 
+    # -- phase 2: conflicts ------------------------------------------------------
+    def _manifest_ro(self) -> sqlite3.Connection | None:
+        cfg = self.cfg()
+        if not cfg.manifest.is_file():
+            return None
+        db = sqlite3.connect(f"file:{cfg.manifest}?mode=ro", uri=True, timeout=30)
+        db.row_factory = sqlite3.Row
+        return db
+
+    def conflicts_pending(self) -> int:
+        try:
+            db = self._manifest_ro()
+            if db is None:
+                return 0
+            with db:
+                return db.execute("SELECT COUNT(*) FROM conflicts WHERE status='pending'").fetchone()[0]
+        except sqlite3.Error:  # no conflicts table yet (manifest from before 0.5)
+            return 0
+
+    def conflicts(self, q: dict) -> dict:
+        from imagepipe.phase2 import conflicts as cf
+
+        try:
+            db = self._manifest_ro()
+            if db is None:
+                return {"rows": [], "total": 0, "pending": {}}
+            with db:
+                return cf.listing(db, q.get("status") or "pending", q.get("field") or "",
+                                  min(int(q.get("limit") or 25), 200), int(q.get("offset") or 0))
+        except sqlite3.OperationalError:
+            return {"rows": [], "total": 0, "pending": {}}
+
+    def resolve_conflict(self, body: dict) -> dict:
+        from imagepipe.manifest import Manifest
+        from imagepipe.phase2 import conflicts as cf
+        from imagepipe.phase2.meta import Tools
+
+        cfg = self.cfg()
+        m = Manifest(cfg.manifest, cfg.tz)
+        tools = Tools()
+        try:
+            return cf.resolve(m, tools, int(body.get("id")), str(body.get("choice") or ""),
+                              bool(body.get("apply_similar")))
+        finally:
+            tools.close()
+            m.close()
+
+    def thumb(self, file_id: int) -> bytes | None:
+        """A small JPEG of a manifest file (for the Conflicts tab)."""
+        import io
+
+        from PIL import Image
+
+        from imagepipe import metadata  # noqa: F401 - HEIF support
+        from imagepipe.phase2.meta import is_raw
+
+        db = self._manifest_ro()
+        if db is None:
+            return None
+        with db:
+            r = db.execute("SELECT current_path FROM files WHERE id=?", (file_id,)).fetchone()
+        if r is None or not r[0] or not os.path.isfile(r[0]):
+            return None
+        src = r[0]
+        if is_raw(src):  # the JPEG preview inside the RAW
+            res = subprocess.run(["exiftool", "-b", "-PreviewImage", src], capture_output=True, timeout=60)
+            if not res.stdout:
+                res = subprocess.run(["exiftool", "-b", "-JpgFromRaw", src], capture_output=True, timeout=60)
+            if not res.stdout:
+                return None
+            src = io.BytesIO(res.stdout)
+        try:
+            with Image.open(src) as im:
+                im.thumbnail((360, 360))
+                buf = io.BytesIO()
+                im.convert("RGB").save(buf, "JPEG", quality=80)
+                return buf.getvalue()
+        except Exception:  # noqa: BLE001
+            return None
+
     def status_text(self) -> str:
         parts = []
-        for argv in (["status"], ["triage", "status"]):
+        for argv in (["status"], ["triage", "status"], ["phase2", "status"]):
             try:
                 res = subprocess.run([sys.executable, "-m", "imagepipe", "-c", str(self.config_path), *argv],
                                      capture_output=True, text=True, timeout=120)
@@ -490,6 +587,18 @@ def make_handler(app: App):
                     self._json(app.action_rows(q))
                 elif url.path == "/api/reports":
                     self._json(app.reports())
+                elif url.path == "/api/conflicts":
+                    self._json(app.conflicts(q))
+                elif url.path == "/api/thumb":
+                    body = app.thumb(int(q.get("file_id") or 0))
+                    if body is None:
+                        return self._json({"error": "no picture"}, HTTPStatus.NOT_FOUND)
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "max-age=300")
+                    self.end_headers()
+                    self.wfile.write(body)
                 elif url.path == "/api/file":
                     p = app.allowed_file(q.get("path", ""))
                     if p is None:
@@ -540,6 +649,8 @@ def make_handler(app: App):
                     from imagepipe.tools import check
 
                     self._json(check(str(body.get("tool") or ""), body.get("values") or {}))
+                elif url.path == "/api/conflicts/resolve":
+                    self._json(app.resolve_conflict(body))
                 elif url.path == "/api/reports/delete":
                     self._json(app.delete_reports(body.get("paths") or [], everything=bool(body.get("all"))))
                 else:

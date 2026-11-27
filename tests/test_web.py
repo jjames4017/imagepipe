@@ -251,3 +251,41 @@ def test_tools_settings_and_test_button(web):
     r = post(base, "/api/tools/test", {"tool": "scansplitter", "values": {"url": "http://127.0.0.1:9"}})
     assert r["ok"] is False and "connect" in r["message"]
     assert post(base, "/api/tools/test", {"tool": "nope", "values": {}})["ok"] is False
+
+
+def test_phase2_and_pdf_jobs_argv():
+    from imagepipe.web.server import build_argv
+
+    assert build_argv("triage-check-pdfs", {}) == ["triage", "check-pdfs"]
+    assert build_argv("phase2-find", {}) == ["phase2", "run", "--find-only"]
+    assert build_argv("phase2-run", {"batch": "2015-06"}) == ["phase2", "run", "--batch", "2015-06"]
+    assert build_argv("phase2-ready-check", {}) == ["phase2", "ready-check"]
+    with pytest.raises(ValueError):
+        build_argv("phase2-run", {"batch": "../x"})
+
+
+def test_conflicts_tab_api(tmp_path, monkeypatch):
+    import shutil as _sh
+
+    if _sh.which("exiftool") is None:
+        pytest.skip("exiftool not installed")
+    from tests.test_phase2 import jpeg, make_cfg
+
+    from imagepipe.phase2.run import run_phase2
+
+    cfg, stack = make_cfg(tmp_path, monkeypatch)
+    images = stack / "sorted" / "images"
+    images.mkdir(parents=True)
+    (images / "d.jpg").write_bytes(jpeg(date="2020:01:05 14:00:00"))
+    (images / "d.jpg.json").write_text(json.dumps({"title": "d.jpg", "photoTakenTime": {"timestamp": "1578196800"}}))
+    run_phase2(cfg)
+    app = App(cfg.path)
+    assert app.meta()["conflicts_pending"] == 1
+    listing = app.conflicts({})
+    row = listing["rows"][0]
+    assert row["field"] == "date" and row["recommended"]["offset"] == "+10:00"
+    assert app.thumb(row["file_id"])[:2] == b"\xff\xd8"
+    with pytest.raises(ValueError):
+        app.resolve_conflict({"id": row["id"], "choice": "nope"})
+    res = app.resolve_conflict({"id": row["id"], "choice": "takeout"})
+    assert res["resolved"] == 1 and app.meta()["conflicts_pending"] == 0
