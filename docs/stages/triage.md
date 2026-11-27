@@ -62,6 +62,7 @@ folder named after the source:
 | `imagepipe triage apply [--limit N]` | Carries out the plan | **Yes - moves files** |
 | `imagepipe triage status` | Counts by status and bucket, recent runs | No |
 | `imagepipe triage export-csv` | Every file in the triage database, one CSV | No |
+| `imagepipe triage check-pdfs` | Sorts the PDFs in `sorted/documents` - see [Check PDFs](#check-pdfs) | **Yes - moves PDFs, writes photos** |
 | `imagepipe triage relocate [--dry-run]` | Moves files sorted before 0.4 from the old folders into the filestack | **Yes - moves files** |
 
 Run them in the foreground (`docker compose run --rm imagepipe triage ...`) so
@@ -414,3 +415,48 @@ All are in the Docker image:
 
 Each optional one that is missing is reported once, and triage carries on
 without it.
+
+## Check PDFs
+
+`imagepipe triage check-pdfs` (Run tab: **Check PDFs**) is a job of its own,
+separate from scan, plan and apply, with its own progress, Pause and Stop. Each
+run checks every PDF in `<filestack>/sorted/documents/` it hasn't checked yet
+(the first run covers everything already sorted; later runs only new or changed
+PDFs), and follows up PDFs waiting for review.
+
+Each page is read for text - its text layer, and Tesseract OCR when the text
+layer has little - and, if it holds any image, sent to ScanSplitter to find
+photos:
+
+| Page | When |
+|---|---|
+| photo page | ScanSplitter's photos cover at least **`pdf_photo_coverage`** % of the page (default 60) and it has little or no text (fewer than **`pdf_text_chars`** letters and digits, default 50) |
+| document page | substantial text and no photos (a page with text and no images at all is not sent to ScanSplitter) |
+| uncertain | anything else, or ScanSplitter's detection failed |
+
+| PDF | Goes to |
+|---|---|
+| every page a photo page | split by ScanSplitter (below) |
+| every page a document page | stays in `sorted/documents/` |
+| a mix, or any uncertain page | `sorted/quarantine/pdf-uncertain/` |
+| over ScanSplitter's limits (200 MB, 200 pages) | stays where it is, listed as too large |
+
+**Splitting.** Each run makes its own ScanSplitter project
+("ImagePipe PDF check <date> <time>") and uploads the photo PDFs into it.
+Pages ScanSplitter raised no CHECK flag for are approved by ImagePipe and their
+photos exported straight away to `sorted/images/` (same folders as the PDF,
+named `<PDF name>_p<page>_<n>.jpg`). Pages with a CHECK flag wait for you in
+ScanSplitter's Projects page: fix the boxes and approve them there (or delete a
+page to skip it). Every later run exports the pages you approved. When all
+pages of a PDF are done the PDF moves to `sorted/excluded/pdf-source/`.
+ScanSplitter's own Deliver is never used. A run's project is deleted again at
+the end if nothing in it is waiting for review.
+
+Pages of PDFs that turn out not to be photo PDFs are taken out of the project
+again, so the review list only holds real photo pages. Every move and every
+exported photo is in `actions.csv` and the Actions tab. `imagepipe triage
+status` shows the counts by verdict.
+
+Needs ScanSplitter's address (Settings > External tools); the Docker image
+includes Tesseract and Poppler. If ScanSplitter can't be reached the job stops
+without changing anything for the PDF it was on.

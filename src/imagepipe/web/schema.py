@@ -111,6 +111,18 @@ TOOLS = [
                 {"key": "password", "type": "secret", "label": "Password"}]},
 ]
 
+PHASE2 = [
+    {"key": "enabled", "type": "bool", "label": "Phase 2 switched on", "default": False,
+     "help": "Off until the PhotoPrism export exists. While off, Phase 2 jobs refuse to run"},
+    {"key": "batch_size", "type": "int", "label": "Photos per batch", "default": 2000,
+     "help": "A month with more photos than this is split; undated photos go in batches this big"},
+    {"key": "burst_gap_seconds", "type": "int", "label": "Burst: seconds between shots", "default": 2,
+     "help": "Photos from one camera this close together count as one burst (flagged only)"},
+    {"key": "burst_min", "type": "int", "label": "Burst: at least this many photos", "default": 3},
+    {"key": "low_res_pixels", "type": "int", "label": "Low resolution below (long edge, pixels)", "default": 1000,
+     "help": "Flagged only; whether a bigger copy exists is checked at stage 6"},
+]
+
 SCHEMA = [
     {"section": None, "label": "General", "fields": TOP},
     {"section": "catalogue", "label": "Catalogue", "fields": CATALOGUE},
@@ -119,4 +131,7 @@ SCHEMA = [
      "help": "Where each outside tool is. Saved in imagepipe.yml (passwords and keys too). Test checks a tool "
              "from this container, using what is typed in the form, saved or not."},
     {"section": "triage", "label": "Triage", "optional": True, "fields": TRIAGE},
+    {"section": "phase2", "label": "Phase 2", "optional": True, "fields": PHASE2,
+     "help": "Stages 1, 2 and 4: month batches into <filestack>/imagepipe/processing/, IDs written into the files, "
+             "exact duplicates out, conflicts to the Conflicts tab. Uses the triage section's filestack and categories."},
 ]
