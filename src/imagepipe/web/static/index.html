@@ -98,6 +98,11 @@
           <span class="muted">limit</span><input type="number" id="t-limit" min="1" placeholder="all" style="width:110px">
         </div>
         <div class="row muted" id="planned"></div>
+        <h2 style="margin-top:16px">PDFs</h2>
+        <p class="sub">Checks every PDF in sorted/documents not checked yet: documents stay, photo scans are split by
+          ScanSplitter into sorted/images (pages with a CHECK flag wait for you in ScanSplitter's Projects page and are
+          picked up next run), uncertain ones go to sorted/quarantine/pdf-uncertain.</p>
+        <div class="row"><button class="b" data-job="triage-check-pdfs">Check PDFs</button></div>
       </div>
       <div class="card">
         <h2>Catalogue</h2>

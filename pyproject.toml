@@ -23,7 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 heif = ["pillow-heif>=0.16"]
-triage = ["reverse_geocoder>=1.5"]
+triage = ["reverse_geocoder>=1.5", "pypdf>=4"]
 layered = ["psd-tools>=1.9", "tifffile>=2023.1", "imagecodecs>=2023.1"]
 dev = ["pytest>=8", "mkdocs-material>=9"]
 

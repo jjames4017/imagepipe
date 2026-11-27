@@ -44,6 +44,7 @@ JOBS = {
     "triage-plan": "Triage: plan (dry run)",
     "triage-apply": "Triage: apply (moves files)",
     "triage-export-csv": "Triage: export CSV",
+    "triage-check-pdfs": "Triage: check PDFs",
 }
 
 
@@ -76,6 +77,8 @@ def build_argv(job: str, opts: dict) -> list[str]:
         return ["triage", "apply"] + (["--limit", limit] if limit else [])
     if job == "triage-export-csv":
         return ["triage", "export-csv"]
+    if job == "triage-check-pdfs":
+        return ["triage", "check-pdfs"]
     raise ValueError(f"Unknown job '{job}'")
 
 

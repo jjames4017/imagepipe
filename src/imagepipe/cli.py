@@ -203,6 +203,28 @@ def cmd_triage_apply(cfg, args) -> int:
     return 130
 
 
+def cmd_triage_check_pdfs(cfg, args) -> int:
+    from imagepipe.triage.pdfcheck import run_pdf_check
+
+    tc = _triage_cfg(cfg)
+    try:
+        result = run_pdf_check(cfg)
+    except Exception as exc:
+        log.exception("PDF check failed")
+        print(f"ERROR: {exc}", file=sys.stderr)
+        notify.send(cfg.notify, "error", "Triage PDF check failed", str(exc), "failure")
+        return 2
+    stats = result["stats"]
+    print("PDF check: " + (", ".join(f"{v:,} {k}" for k, v in sorted(stats.items())) or "nothing to do"))
+    print(f"Every move and export is in {tc.reports_dir / 'actions.csv'}", file=sys.stderr)
+    body = ", ".join(f"{v:,} {k}" for k, v in sorted(stats.items())) or "nothing to do"
+    if result["status"] == "finished":
+        notify.send(cfg.notify, "finished", "Triage PDF check finished", body, "success")
+        return 0
+    notify.send(cfg.notify, "error", "Triage PDF check interrupted", body, "warning")
+    return 130
+
+
 def cmd_triage_status(cfg, args) -> int:
     from imagepipe.triage.reports import status_text
 
@@ -359,6 +381,9 @@ def build_parser() -> argparse.ArgumentParser:
     ta = tsub.add_parser("apply", help="carry out the plan: move, extract archives, write tags")
     ta.add_argument("--limit", type=int, help="stop after this many files/archives (for a trial run)")
     ta.set_defaults(func=cmd_triage_apply)
+    tc_ = tsub.add_parser("check-pdfs", help="sort the PDFs in sorted/documents into documents, photo scans "
+                          "(split by ScanSplitter) and uncertain")
+    tc_.set_defaults(func=cmd_triage_check_pdfs)
     tst = tsub.add_parser("status", help="counts by status and bucket, recent runs")
     tst.set_defaults(func=cmd_triage_status)
     tr = tsub.add_parser("relocate", help="move already-sorted files from the old folders (before 0.4) into the filestack")
