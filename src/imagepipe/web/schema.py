@@ -93,11 +93,16 @@ TOOLS = [
      "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:2283"},
                 {"key": "api_key", "type": "secret", "label": "API key"}]},
     {"key": "a_eye", "type": "group", "label": "A-Eye", "test": True,
-     "help": "Test opens the web page",
-     "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:8000"}]},
+     "help": "Test calls /api/health and, with a username and password, signs in to /api/watch/status "
+             "(reads only)",
+     "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:8000"},
+                {"key": "username", "type": "str", "label": "Username"},
+                {"key": "password", "type": "secret", "label": "Password"}]},
     {"key": "digikam", "type": "group", "label": "digiKam", "test": True,
-     "help": "Test opens the web page",
-     "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:3011"}]},
+     "help": "Test opens the web page, signing in with the username and password (HTTP Basic) if set",
+     "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "https://<host>:3011"},
+                {"key": "username", "type": "str", "label": "Username"},
+                {"key": "password", "type": "secret", "label": "Password"}]},
 ]
 
 SCHEMA = [

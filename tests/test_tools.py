@@ -96,3 +96,38 @@ def test_immich_key(server):
 def test_unreachable():
     r = check("a_eye", {"url": "http://127.0.0.1:9"})
     assert not r["ok"] and "connect" in r["message"]
+
+
+def _basic_ok(user, pw):
+    from imagepipe.tools import basic_auth
+
+    want = basic_auth(user, pw)["Authorization"]
+    return lambda headers, body: (200, {"running": False}) if headers.get("Authorization") == want \
+        else (401, {"detail": "Authentication required"})
+
+
+def test_a_eye_login(server):
+    Fake.routes = {("GET", "/api/health"): (200, {"status": "ok"}),
+                   ("GET", "/api/watch/status"): (200, _basic_ok("admin", "s3cret"))}
+    r = check("a_eye", {"url": server})
+    assert r["ok"] and "wasn't checked" in r["message"]
+    r = check("a_eye", {"url": server, "username": "admin", "password": "s3cret"})
+    assert r["ok"] and "login for 'admin' works" in r["message"]
+    r = check("a_eye", {"url": server, "username": "admin", "password": "wrong"})
+    assert not r["ok"] and "refused" in r["message"]
+
+
+def test_digikam_login(server):
+    Fake.routes = {("GET", "/"): (200, _basic_ok("jj", "pw"))}
+    r = check("digikam", {"url": server})
+    assert not r["ok"] and "asks for a login" in r["message"]
+    r = check("digikam", {"url": server, "username": "jj", "password": "pw"})
+    assert r["ok"] and "works" in r["message"]
+    r = check("digikam", {"url": server, "username": "jj", "password": "no"})
+    assert not r["ok"] and "refused" in r["message"]
+
+
+def test_parse_tools_login_fields():
+    t = parse_tools({"a_eye": {"url": "http://h:8000", "username": "u", "password": "p"},
+                     "digikam": {"url": "https://h:3011", "username": "d", "password": "q"}})
+    assert (t.a_eye.username, t.a_eye.password, t.digikam.username) == ("u", "p", "d")
