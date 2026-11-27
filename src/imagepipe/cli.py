@@ -220,6 +220,24 @@ def cmd_triage_export(cfg, args) -> int:
     return 0
 
 
+def cmd_triage_relocate(cfg, args) -> int:
+    from imagepipe.triage.relocate import run_relocate
+
+    tc = _triage_cfg(cfg)
+    print(("Dry run - nothing moves.\n" if args.dry_run else "") + "From the old folders:\n" +
+          "".join(f"  {k}: {v}\n" for k, v in tc.legacy_destinations.items()) +
+          f"to the filestack: {tc.filestack}/sorted/", file=sys.stderr)
+    res = run_relocate(cfg, dry_run=args.dry_run)
+    print(", ".join(f"{v:,} {k}" for k, v in res.items() if k != "folder") or "nothing to do")
+    print(f"Every file is listed in {res['folder']}/moves.csv")
+    if res.get("copied"):
+        print(f"WARNING: {res['copied']:,} files were copied instead of linked - the old folders and the filestack "
+              "are on different mounts in the container. Moves still checked by SHA-256.", file=sys.stderr)
+    if not args.dry_run and not res.get("error"):
+        print("Next: run `imagepipe triage plan` again (files planned before used the old folders).", file=sys.stderr)
+    return 1 if res.get("error") else 0
+
+
 def cmd_layered_find(cfg, args) -> int:
     from imagepipe import layered
 
@@ -258,10 +276,10 @@ def cmd_layered_move(cfg, args) -> int:
     from imagepipe import layered
 
     tc = getattr(cfg, "triage", None)
-    root = Path(args.root) if args.root else (tc.destinations["imagepipe"] if tc else None)
-    to = Path(args.to) if args.to else (tc.destinations["sorted"] / "specials" if tc else None)
+    root = Path(args.root) if args.root else (tc.bucket_dir("images") if tc else None)
+    to = Path(args.to) if args.to else (tc.bucket_dir("specials") if tc else None)
     if root is None or to is None:
-        print("Give --root and --to (no triage destinations configured).", file=sys.stderr)
+        print("Give --root and --to (no triage section configured).", file=sys.stderr)
         return 2
     csv_path = Path(args.csv)
     if not csv_path.is_file():
@@ -343,6 +361,9 @@ def build_parser() -> argparse.ArgumentParser:
     ta.set_defaults(func=cmd_triage_apply)
     tst = tsub.add_parser("status", help="counts by status and bucket, recent runs")
     tst.set_defaults(func=cmd_triage_status)
+    tr = tsub.add_parser("relocate", help="move already-sorted files from the old folders (before 0.4) into the filestack")
+    tr.add_argument("--dry-run", action="store_true", help="list what would move; move nothing")
+    tr.set_defaults(func=cmd_triage_relocate)
     te = tsub.add_parser("export-csv", help="write every file in the triage database to one CSV")
     te.add_argument("--output")
     te.set_defaults(func=cmd_triage_export)
@@ -359,8 +380,8 @@ def build_parser() -> argparse.ArgumentParser:
     lr.set_defaults(func=cmd_layered_render)
     lm = lsub.add_parser("move", help="move every file in a 'layered find' CSV aside, keeping its folders")
     lm.add_argument("--csv", required=True, help="the layered.csv from 'imagepipe layered find'")
-    lm.add_argument("--to", help="where to (default: <triage sorted>/specials)")
-    lm.add_argument("--root", help="the folder the paths are under (default: the triage imagepipe destination)")
+    lm.add_argument("--to", help="where to (default: <filestack>/sorted/specials)")
+    lm.add_argument("--root", help="the folder the paths are under (default: <filestack>/sorted/images)")
     lm.add_argument("--dry-run", action="store_true", help="list what would move; move nothing")
     lm.set_defaults(func=cmd_layered_move)
     return p

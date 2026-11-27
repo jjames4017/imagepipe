@@ -15,7 +15,11 @@ services:
       - "8020:8020"
     environment:
       TZ: Australia/Brisbane
+      # Triage only: where everything is sorted to. Must be inside the SAME mount as the
+      # triage sources, or every move becomes a copy. Can only be changed here.
+      IMAGEPIPE_FILESTACK: /wolf-pool/vault/filestack   # CHANGE ME
     volumes:
       - ./config:/config                      # holds imagepipe.yml (read-write so the web UI can save settings)
       - /srv/imagepipe/data:/data             # CHANGE ME: manifest, logs, reports
       - /srv/photos:/sources/photos:ro        # CHANGE ME: a source folder, always read-only
+      # - /wolf-pool/vault:/wolf-pool/vault   # triage: sources and filestack in ONE mount, same path as the host

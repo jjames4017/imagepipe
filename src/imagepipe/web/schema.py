@@ -3,12 +3,14 @@
 Each field: key, type, label, help, and for some: choices, default.
 Types: str, path, int, bool, choice, multi (several choices), list (lines of
 text), size (e.g. 20MB), map (key -> choice), sources (list of records),
-group (fixed sub-mapping).
+group (fixed sub-mapping), readonly (shown, never saved: comes from the compose
+file), categories (name -> pipeline + extensions).
 """
 
 from __future__ import annotations
 
-from imagepipe.triage.config import BUCKETS, EMBED_KINDS
+from imagepipe.triage.config import EMBED_KINDS, FILESTACK_ENV, PIPELINES
+from imagepipe.triage.kinds import DEFAULT_CATEGORIES
 
 TOP = [
     {"key": "timezone", "type": "str", "label": "Time zone", "default": "Australia/Brisbane",
@@ -48,20 +50,21 @@ TRIAGE = [
     {"key": "database", "type": "path", "label": "Triage database"},
     {"key": "log_dir", "type": "path", "label": "Log folder"},
     {"key": "reports_dir", "type": "path", "label": "Reports folder", "help": "Plan reports and actions.csv"},
-    {"key": "work_dir", "type": "path", "label": "Archive extraction folder",
-     "help": "Same file system as the destinations, so moves are instant"},
+    {"key": "filestack", "type": "readonly", "label": "Filestack folder", "env": FILESTACK_ENV,
+     "help": f"Set by {FILESTACK_ENV} in the compose file and can only be changed there. Everything triage "
+             "sorts goes to <filestack>/sorted/; archives are extracted in <filestack>/triage/work/. It must be "
+             "inside the same container mount as the triage sources, or every move becomes a copy."},
     {"key": "sources", "type": "sources", "label": "Triage sources", "help": "Files are MOVED out of these",
      "fields": [
          {"key": "name", "type": "str", "label": "Name"},
          {"key": "path", "type": "path", "label": "Path"},
          {"key": "exclude", "type": "list", "label": "Exclude patterns", "optional": True},
      ]},
-    {"key": "destinations", "type": "group", "label": "Destinations", "fields": [
-        {"key": "imagepipe", "type": "path", "label": "imagepipe (photos)"},
-        {"key": "docupipe", "type": "path", "label": "docupipe (documents)"},
-        {"key": "sorted", "type": "path", "label": "sorted (by type)"},
-        {"key": "quarantine", "type": "path", "label": "quarantine (by reason)"},
-    ]},
+    {"key": "categories", "type": "categories", "label": "Categories", "choices": list(PIPELINES),
+     "default": DEFAULT_CATEGORIES,
+     "help": "Each category is a folder under <filestack>/sorted/. Extensions decide the category (content "
+             "checks for empty, corrupt or encrypted files come first). Pipeline: which pipeline picks the "
+             "category up, or none (the folder is the files' final place). One pipeline per category."},
     {"key": "workers", "type": "int", "label": "Workers", "default": 8},
     {"key": "verify", "type": "choice", "label": "Verify moves", "choices": ["auto", "hash"], "default": "auto",
      "help": "auto: inode check for same-disk moves, SHA-256 for copies. hash: SHA-256 always"},
@@ -73,8 +76,6 @@ TRIAGE = [
     {"key": "max_archive_depth", "type": "int", "label": "Archives inside archives, depth", "default": 5},
     {"key": "max_extract_bytes", "type": "size", "label": "Largest unpacked archive", "default": "200GB"},
     {"key": "smartname_max_length", "type": "int", "label": "Smartname length", "default": 80},
-    {"key": "bucket_overrides", "type": "map", "label": "Bucket overrides", "choices": list(BUCKETS),
-     "default": {}, "help": "Extension -> bucket, e.g. json -> docupipe"},
 ]
 
 SCHEMA = [

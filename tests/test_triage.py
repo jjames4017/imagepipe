@@ -141,17 +141,11 @@ triage:
   database: {tmp_path}/triage/triage.db
   log_dir: {tmp_path}/triage/logs
   reports_dir: {tmp_path}/triage/reports
-  work_dir: {vault}/triage-work
   sources:
     - name: photos
       path: {vault}/photos
     - name: file-cabinet
       path: "{vault}/file cabinet"
-  destinations:
-    imagepipe: {vault}/imagepipe
-    docupipe: {vault}/docupipe
-    sorted: {vault}/sorted
-    quarantine: {vault}/quarantine
   workers: 2
   embed_metadata: [image, pdf]
 """)
@@ -212,13 +206,13 @@ def test_embed_is_off_by_default(env):
     cfg, vault = env
     from imagepipe.triage.config import parse_triage
 
-    raw = {"database": "/t/db", "log_dir": "/t/l", "reports_dir": "/t/r", "work_dir": "/w",
-           "sources": [{"name": "s", "path": "/s"}],
-           "destinations": {"imagepipe": "/a", "docupipe": "/b", "sorted": "/c", "quarantine": "/d"}}
+    raw = {"database": "/t/db", "log_dir": "/t/l", "reports_dir": "/t/r",
+           "sources": [{"name": "s", "path": "/s"}]}
     assert parse_triage(raw).embed_metadata == []
 
 
-def test_config_rejects_overlap(tmp_path):
+def test_config_rejects_overlap(tmp_path, monkeypatch):
+    monkeypatch.setenv("IMAGEPIPE_FILESTACK", str(tmp_path / "src" / "filestack"))
     p = tmp_path / "c.yml"
     p.write_text(f"""
 manifest: {tmp_path}/m.db
@@ -228,9 +222,7 @@ triage:
   database: {tmp_path}/t.db
   log_dir: {tmp_path}/tl
   reports_dir: {tmp_path}/tr
-  work_dir: {tmp_path}/src/work
   sources: [{{name: s, path: {tmp_path}/src}}]
-  destinations: {{imagepipe: {tmp_path}/a, docupipe: {tmp_path}/b, sorted: {tmp_path}/c, quarantine: {tmp_path}/d}}
 """)
     with pytest.raises(ConfigError, match="overlap"):
         load_config(p)
@@ -245,13 +237,13 @@ def test_plan_moves_nothing_and_names_files(env):
     assert (Path(result["report"]) / "plan.csv").is_file()
     for rel in PHOTOS:
         assert (vault / "photos" / rel).exists()
-    assert not (vault / "imagepipe").exists()
+    assert not (vault / "filestack" / "sorted" / "images").exists()
 
     r = rows(cfg)
     bali = r["photos:2014/Bali/IMG_1234.jpg"]
-    assert bali["bucket"] == "imagepipe" and bali["date_source"] == "exif"
+    assert bali["bucket"] == "images" and bali["date_source"] == "exif"
     dest = Path(bali["dest_path"])
-    assert dest.parent == vault / "imagepipe" / "photos" / "2014" / "Bali"
+    assert dest.parent == vault / "filestack" / "sorted" / "images" / "photos" / "2014" / "Bali"
     assert re.fullmatch(rf"{ID_PATTERN}_2014-07-12_.+\.jpg", dest.name), dest.name
     assert dest.name.startswith(bali["triage_id"])
     if HAS_GEO:
@@ -260,12 +252,12 @@ def test_plan_moves_nothing_and_names_files(env):
     assert xmp["companion_of"] == bali["id"] and xmp["dest_path"] == str(dest.with_suffix(".xmp"))
 
     dup = r["photos:old phone backup/DCIM/IMG_1234.jpg"]
-    assert dup["bucket"] == "imagepipe" and dup["sha256"] == bali["sha256"]
-    assert dup["dest_path"].startswith(str(vault / "imagepipe" / "photos" / "old phone backup" / "DCIM"))
+    assert dup["bucket"] == "images" and dup["sha256"] == bali["sha256"]
+    assert dup["dest_path"].startswith(str(vault / "filestack" / "sorted" / "images" / "photos" / "old phone backup" / "DCIM"))
 
     live = r["photos:2019/Mum 70th/IMG_5555.MOV"]
     still = r["photos:2019/Mum 70th/IMG_5555.jpg"]
-    assert live["rule"] == "live-photo-clip" and live["bucket"] == "imagepipe"
+    assert live["rule"] == "live-photo-clip" and live["bucket"] == "images"
     assert Path(live["dest_path"]).stem == Path(still["dest_path"]).stem
     assert "Mum-70th" in still["smartname"]
 
@@ -280,18 +272,18 @@ def test_plan_moves_nothing_and_names_files(env):
     assert r["photos:junk/empty.jpg"]["bucket"] == "quarantine/zero-byte"
     assert r["photos:junk/not_really.jpg"]["bucket"] == "quarantine/corrupt"
     assert r["photos:misc/mystery.qqq"]["bucket"] == "quarantine/unknown-type"
-    assert r["photos:misc/clip.mp4"]["bucket"] == "sorted/video"
-    assert r["photos:misc/song.mp3"]["bucket"] == "sorted/audio"
-    assert r["photos:misc/setup.exe"]["bucket"] == "sorted/software"
-    assert r["photos:misc/app.ts"]["bucket"] == "sorted/code"
-    assert r["photos:misc/clip.mp4"]["dest_path"].startswith(str(vault / "sorted" / "video" / "photos" / "misc"))
+    assert r["photos:misc/clip.mp4"]["bucket"] == "video"
+    assert r["photos:misc/song.mp3"]["bucket"] == "audio"
+    assert r["photos:misc/setup.exe"]["bucket"] == "software"
+    assert r["photos:misc/app.ts"]["bucket"] == "code"
+    assert r["photos:misc/clip.mp4"]["dest_path"].startswith(str(vault / "filestack" / "sorted" / "video" / "photos" / "misc"))
 
     letter = r["file-cabinet:letters/letter.docx"]
-    assert letter["bucket"] == "docupipe" and letter["name_date"] == "2016-03-04_050607"
+    assert letter["bucket"] == "documents" and letter["name_date"] == "2016-03-04_050607"
     assert letter["smartname"] == "letters-letter"  # a descriptive file name beats the Office title (#23)
-    assert Path(letter["dest_path"]).parent == vault / "docupipe" / "file cabinet" / "letters"
+    assert Path(letter["dest_path"]).parent == vault / "filestack" / "sorted" / "documents" / "file cabinet" / "letters"
     receipt = r["file-cabinet:Tax/2019/receipt.pdf"]
-    assert receipt["bucket"] == "docupipe" and receipt["smartname"] == "Tax-receipt"
+    assert receipt["bucket"] == "documents" and receipt["smartname"] == "Tax-receipt"
     assert receipt["name_date"] == "2019" and receipt["date_source"] == "folder"
     assert r["file-cabinet:Holidays/Fiji 2010.zip"]["bucket"] == "extract"
 
@@ -320,16 +312,16 @@ def test_apply_end_to_end(env):
     fiji = r["file-cabinet:Holidays/Fiji 2010.zip"]
     assert fiji["status"] == "extracted"
     photo = r["file-cabinet:Holidays/Fiji 2010/day1/photo1.jpg"]
-    assert photo["bucket"] == "imagepipe" and photo["origin"].endswith("Fiji 2010.zip::day1/photo1.jpg")
-    assert Path(photo["current_path"]).parent == vault / "imagepipe" / "file cabinet" / "Holidays" / "Fiji 2010" / "day1"
-    assert r["file-cabinet:Holidays/Fiji 2010/itinerary.pdf"]["bucket"] == "docupipe"
+    assert photo["bucket"] == "images" and photo["origin"].endswith("Fiji 2010.zip::day1/photo1.jpg")
+    assert Path(photo["current_path"]).parent == vault / "filestack" / "sorted" / "images" / "file cabinet" / "Holidays" / "Fiji 2010" / "day1"
+    assert r["file-cabinet:Holidays/Fiji 2010/itinerary.pdf"]["bucket"] == "documents"
     inner = r["file-cabinet:Holidays/Fiji 2010/inner/a.txt"]
-    assert inner["status"] == "done" and inner["bucket"] == "docupipe"
+    assert inner["status"] == "done" and inner["bucket"] == "documents"
     assert r["file-cabinet:Holidays/backup/old/notes2.txt"]["status"] == "done"
 
     locked = r["file-cabinet:Holidays/locked.zip"]
     assert locked["bucket"] == "quarantine/encrypted" and Path(locked["current_path"]).is_file()
-    assert Path(locked["current_path"]).parent == vault / "quarantine" / "encrypted" / "file cabinet" / "Holidays"
+    assert Path(locked["current_path"]).parent == vault / "filestack" / "sorted" / "quarantine" / "encrypted" / "file cabinet" / "Holidays"
     assert r["file-cabinet:Holidays/broken.zip"]["bucket"] == "quarantine/archive-failed"
 
     # the audit trail: every file has a 'moved' action; archives have 'archive-deleted'
@@ -378,7 +370,7 @@ def test_limit_and_recovery(env):
     # simulate a run stopped half way through a move: link made, original not yet removed
     db = sqlite3.connect(cfg.triage.database)
     db.row_factory = sqlite3.Row
-    row = db.execute("SELECT * FROM files WHERE status='planned' AND bucket='docupipe' LIMIT 1").fetchone()
+    row = db.execute("SELECT * FROM files WHERE status='planned' AND bucket='documents' LIMIT 1").fetchone()
     dest = Path(row["dest_path"])
     dest.parent.mkdir(parents=True, exist_ok=True)
     os.link(row["current_path"], dest)
@@ -412,7 +404,7 @@ def test_names_that_are_not_utf8(env):
     photo = next(v for k, v in r.items() if k.endswith("IMG_0042.jpg"))
     assert photo["status"] == "done"
     # the original folder name's bytes are kept in the destination; the new file name is clean UTF-8
-    dest_dir = os.path.join(os.fsencode(vault / "imagepipe" / "photos"), b"caf\xe9 trip")
+    dest_dir = os.path.join(os.fsencode(vault / "filestack" / "sorted" / "images" / "photos"), b"caf\xe9 trip")
     moved = os.listdir(dest_dir)
     assert len(moved) == 1 and moved[0].endswith(b"_caf-trip.jpg"), moved
     moved[0].decode("utf-8")  # valid UTF-8
@@ -543,9 +535,9 @@ def test_psd_and_protected_office_are_not_problems(env):
 
     assert run_plan(cfg)["status"] == "finished"
     r = rows(cfg)
-    assert r["file-cabinet:art/war.PSD"]["bucket"] == "sorted/specials"  # design files kept aside (#55)
+    assert r["file-cabinet:art/war.PSD"]["bucket"] == "specials"  # design files kept aside (#55)
     assert r["file-cabinet:fin/Banking Details.docx"]["bucket"] == "quarantine/encrypted"
-    assert r["file-cabinet:fin/old format.xlsx"]["bucket"] == "docupipe"
+    assert r["file-cabinet:fin/old format.xlsx"]["bucket"] == "documents"
 
 
 def test_progress_problem_count_is_a_running_total(monkeypatch):
@@ -635,16 +627,16 @@ def test_routing_decisions():
     for ext in ("xlsm", "dotx", "potx", "xltx", "xlsb", "vsdx", "vstx", "vssx", "odg", "oxps", "xps", "idml",
                 "onepkg", "zed", "uzed", "ftmb", "doc", "xls", "webarchive", ""):
         assert classify(_row(**zipped, ext=ext), {}) == ("quarantine/unknown-type", "unrecognised-extension"), ext
-    assert classify(_row(**zipped, ext="kmz"), {})[0] == "sorted/other-known"  # known zip-based types unchanged
+    assert classify(_row(**zipped, ext="kmz"), {})[0] == "other-known"  # known zip-based types unchanged
     ole = dict(mime="application/x-ole-storage")
     for ext in ("ftw", "gno", "fbk", "mpp", "vsd", "pub", "tcw", "hmk", "cl3", "obd"):
-        assert classify(_row(**ole, ext=ext), {})[0] == "sorted/other-known", ext
+        assert classify(_row(**ole, ext=ext), {})[0] == "other-known", ext
     for ext in ("tmp", "crdownload", "asd", "wbk"):
         assert classify(_row(**ole, ext=ext), {}) == ("quarantine/system-junk", f"temp-or-backup-{ext}"), ext
     assert classify(_row(**zipped, ext="crdownload"), {})[0] == "quarantine/system-junk"
     for ext in ("tibuq6", "no1doc", "xls whakapapa", ""):
         assert classify(_row(**ole, ext=ext), {}) == ("quarantine/unknown-type", "unrecognised-extension"), ext
-    assert classify(_row(**ole, ext="doc"), {}) == ("docupipe", "document-doc")
+    assert classify(_row(**ole, ext="doc"), {}) == ("documents", "document-doc")
 
 
 def test_odd_extension_not_used_in_new_name():
@@ -709,20 +701,20 @@ def test_saved_web_pages_stay_together(env):
     assert run_scan(cfg, cfg.triage.source("file-cabinet"))["status"] == "finished"
     assert run_plan(cfg)["status"] == "finished"
     r = rows(cfg)
-    root = vault / "sorted" / "web-pages" / "file cabinet"
+    root = vault / "filestack" / "sorted" / "web-pages" / "file cabinet"
     page = r["file-cabinet:Genealogy/Gwlad.htm"]
-    assert page["bucket"] == "sorted/web-pages" and page["rule"] == "web-page"
+    assert page["bucket"] == "web-pages" and page["rule"] == "web-page"
     assert Path(page["dest_path"]).parent == root / "Genealogy"
     assert Path(page["dest_path"]).name.startswith(page["triage_id"] + "_")  # the page gets an ID name
     for rel in ("Gwlad_files/logo_top (3).gif", "Gwlad_files/style.css", "Gwlad_files/sub/deep.jpg"):
         x = r[f"file-cabinet:Genealogy/{rel}"]
-        assert x["bucket"] == "sorted/web-pages" and x["rule"] == "web-page-files", rel
+        assert x["bucket"] == "web-pages" and x["rule"] == "web-page-files", rel
         assert x["dest_path"] == str(root / "Genealogy" / rel), rel  # folder and names kept
         assert x["triage_id"]
-    assert r["file-cabinet:Genealogy/Lonely.html"]["bucket"] == "docupipe"  # no _files folder: a normal document
+    assert r["file-cabinet:Genealogy/Lonely.html"]["bucket"] == "documents"  # no _files folder: a normal document
     assert r["file-cabinet:Saved/Old page_files/pic.jpg"]["dest_path"] == str(root / "Saved" / "Old page_files" / "pic.jpg")
-    assert r["file-cabinet:Mine/my_files/holiday.jpg"]["bucket"] == "imagepipe"  # not a web folder
-    assert r["file-cabinet:Saved/Whole page.mht"]["bucket"] == "sorted/web-pages"
+    assert r["file-cabinet:Mine/my_files/holiday.jpg"]["bucket"] == "images"  # not a web folder
+    assert r["file-cabinet:Saved/Whole page.mht"]["bucket"] == "web-pages"
 
 
 # ------------------------------------------------- #14 plan speed
@@ -749,7 +741,7 @@ def test_plan_folder_error_only_undoes_that_folder(env, monkeypatch):
     def flaky(self, rows, source_folder, progress):
         if rows and rows[0]["dir"] == "letters":
             for r in rows:  # half-done work in the failing folder must be undone
-                self.t.update(r["id"], bucket="docupipe", status="planned")
+                self.t.update(r["id"], bucket="documents", status="planned")
             raise RuntimeError("boom")
         return real(self, rows, source_folder, progress)
 
@@ -892,7 +884,7 @@ def test_office_lock_files_and_generic_titles():
     lock = _row(mime="application/vnd.openxmlformats", ext="pptx", rel_path="Meetings/~$Regional Councils 2.pptx")
     assert classify(lock, {}) == ("quarantine/system-junk", "office-lock-file")
     real = _row(mime="application/vnd.openxmlformats", ext="pptx", rel_path="Meetings/Regional Councils 2.pptx")
-    assert classify(real, {})[0] == "docupipe"
+    assert classify(real, {})[0] == "documents"
     for t in ("Track 23", "track23", "Audio Track 4", "Chapter 7", "Untitled", "title"):
         assert is_generic_title(t), t
     for t in ("Paddlin Madelin Home", "Track and field results", "Chapter of my life"):
@@ -999,11 +991,11 @@ def test_genealogy_and_thumbnail_cache_routing():
     from imagepipe.triage.kinds import classify
 
     for ext in ("paf", "ged"):
-        assert classify(_row(kind="unknown", ext=ext, rel_path=f"x/tree.{ext}"), {})[0] == "sorted/other-known"
-        assert classify(_row(mime="text/plain", ext=ext, rel_path=f"x/tree.{ext}"), {})[0] == "sorted/other-known"
+        assert classify(_row(kind="unknown", ext=ext, rel_path=f"x/tree.{ext}"), {})[0] == "other-known"
+        assert classify(_row(mime="text/plain", ext=ext, rel_path=f"x/tree.{ext}"), {})[0] == "other-known"
     db = _row(kind="unknown", ext="db", rel_path="Pics/Funeral/photothumb.db")
     assert classify(db, {}) == ("quarantine/system-junk", "system-junk-file")
-    assert classify(_row(kind="unknown", ext="db", rel_path="x/family.db"), {})[0] == "sorted/other-known"
+    assert classify(_row(kind="unknown", ext="db", rel_path="x/family.db"), {})[0] == "other-known"
 
 
 def test_repeated_words_dropped():
@@ -1052,7 +1044,7 @@ def test_reread_ext_and_email_dates(env):
     assert res["to_read"] == res["reread_files"] == 1
     assert run_plan(cfg)["status"] == "finished"
     r = rows(cfg)["file-cabinet:Old Documents/Nanna, Father & Mum.eml"]
-    assert r["bucket"] == "sorted/email" and (r["name_date"], r["date_source"]) == ("2001-03-12_180509", "email")
+    assert r["bucket"] == "email" and (r["name_date"], r["date_source"]) == ("2001-03-12_180509", "email")
 
     with pytest.raises(ValueError):
         run_scan(cfg, src, reread="ext", reread_ext=[])
@@ -1100,10 +1092,10 @@ def test_specials_routing():
                 "afdesign", "afphoto", "indd", "mpo", "ico"):
         for kind in ("image", "unknown", "document"):
             assert classify(_row(kind=kind, ext=ext, rel_path=f"x/a.{ext}"), {}) == (
-                "sorted/specials", f"special-{ext}"), (ext, kind)
+                "specials", f"special-{ext}"), (ext, kind)
     assert classify(_row(kind="empty", ext="psd", rel_path="x/a.psd"), {})[0] == "quarantine/zero-byte"
     for ext in ("heic", "gif", "webp", "png", "jpg"):
-        assert classify(_row(kind="image", ext=ext, rel_path=f"x/a.{ext}"), {})[0] == "imagepipe", ext
+        assert classify(_row(kind="image", ext=ext, rel_path=f"x/a.{ext}"), {})[0] == "images", ext
 
 
 def test_plan_sends_odd_tiffs_to_specials(env):
@@ -1122,7 +1114,7 @@ def test_plan_sends_odd_tiffs_to_specials(env):
     assert run_plan(cfg)["status"] == "finished"
     r = rows(cfg)
     assert (r["file-cabinet:scans/two.tif"]["bucket"], r["file-cabinet:scans/two.tif"]["rule"]) == (
-        "sorted/specials", "special-tiff-pages")
+        "specials", "special-tiff-pages")
     assert r["file-cabinet:scans/layers.tif"]["rule"] == "special-tiff-layered"
-    assert r["file-cabinet:scans/plain.tif"]["bucket"] == "imagepipe"
-    assert r["file-cabinet:scans/two.tif"]["dest_path"].startswith(str(vault / "sorted" / "specials" / "file cabinet"))
+    assert r["file-cabinet:scans/plain.tif"]["bucket"] == "images"
+    assert r["file-cabinet:scans/two.tif"]["dest_path"].startswith(str(vault / "filestack" / "sorted" / "specials" / "file cabinet"))

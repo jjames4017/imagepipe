@@ -18,7 +18,7 @@ There is **no login**: keep it on your LAN.
 | Plan review | Every file the last triage plan placed - from, to, bucket, rule, date and smartname and where each came from - filterable by bucket and rule, and searchable. Nothing here has moved yet |
 | Actions | Everything triage has done, newest first, filterable and searchable (the same as `actions.csv`) |
 | Reports | Every report and log, to read in the page or download, and the JPEG/PNG working copies from `imagepipe layered render` (click to view the picture). **Delete** next to each removes that file; **Delete all logs** removes every log and report listed. Both ask first and are refused while a job is running. The audit trail (`actions.csv`) and the triage database are always kept, and folders left empty are removed |
-| Settings | Every setting in the config file, as a form or as raw YAML |
+| Settings | Every setting in the config file, as a form or as raw YAML. Triage shows the filestack folder read-only (it comes from `IMAGEPIPE_FILESTACK` in the compose file) and the **Categories** list: each category's extensions and the pipeline that picks it up, or none |
 
 **Apply asks first.** It is the one job that moves files, so the page shows how
 many files are planned and asks you to confirm.

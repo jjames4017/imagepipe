@@ -404,7 +404,7 @@ def _follow_in_triage(t, src: str, dest: str) -> None:
     row = t.db.execute("SELECT * FROM files WHERE current_path = ?", (src,)).fetchone()
     if row is None:
         return
-    t.update(row["id"], current_path=dest, dest_path=dest, bucket="sorted/specials", rule="special-review")
+    t.update(row["id"], current_path=dest, dest_path=dest, bucket="specials", rule="special-review")
     t.action(None, row, "moved", src, dest, "special-review", detail="imagepipe layered move")
     t.db.commit()
 

@@ -88,8 +88,8 @@ def test_run_scan_plan_and_review(web):
 
     assert post(base, "/api/job/start", {"kind": "triage-plan", "options": {}})["ok"]
     assert wait_job(base)["job"]["status"] == "finished"
-    plan = get(base, "/api/plan?bucket=docupipe")
-    assert plan["total"] >= 3 and all(r["bucket"] == "docupipe" for r in plan["rows"])
+    plan = get(base, "/api/plan?bucket=documents")
+    assert plan["total"] >= 3 and all(r["bucket"] == "documents" for r in plan["rows"])
     assert get(base, "/api/meta")["planned"]["files"] > 0
 
     assert post(base, "/api/job/start", {"kind": "triage-apply", "options": {"limit": "2"}})["ok"]
@@ -212,3 +212,29 @@ def test_reports_show_render_images(web):
         assert r.headers["Content-Type"] == "image/jpeg" and r.read() == buf.getvalue()
     with urllib.request.urlopen(base + "/api/file?download=1&path=" + _q(row["path"])) as r:
         assert "attachment" in r.headers["Content-Disposition"] and "UTF-8''M%C4%81ori" in r.headers["Content-Disposition"]
+
+
+def test_settings_filestack_and_categories(web):
+    base, cfg, vault, app = web
+    meta = get(base, "/api/meta")
+    assert meta["env"]["IMAGEPIPE_FILESTACK"] == str(vault / "filestack")
+    triage = next(s for s in get(base, "/api/schema") if s["section"] == "triage")
+    keys = {f["key"]: f for f in triage["fields"]}
+    assert keys["filestack"]["type"] == "readonly" and "destinations" not in keys and "work_dir" not in keys
+    assert keys["categories"]["type"] == "categories" and "images" in keys["categories"]["default"]
+
+    # the old folders (before 0.4) aren't in the form, but a form save keeps them for `triage relocate`
+    text = cfg_text = Path(app.config_path).read_text()
+    text = text.replace("triage:\n", f"triage:\n  work_dir: {vault}/triage-work\n  destinations: "
+                        f"{{imagepipe: {vault}/imagepipe, docupipe: {vault}/docupipe, sorted: {vault}/sorted, "
+                        f"quarantine: {vault}/quarantine}}\n", 1)
+    assert post(base, "/api/config/raw", {"text": text})["ok"]
+    data = get(base, "/api/config")["data"]
+    data["triage"].pop("destinations")
+    data["triage"].pop("work_dir")
+    data["triage"]["categories"] = {"images": {"pipeline": "imagepipe", "extensions": ["jpg"]}}
+    assert post(base, "/api/config", {"data": data})["ok"]
+    saved = get(base, "/api/config")["data"]["triage"]
+    assert saved["destinations"]["imagepipe"] == f"{vault}/imagepipe" and saved["work_dir"] == f"{vault}/triage-work"
+    assert saved["categories"]["images"]["extensions"] == ["jpg"]
+    assert cfg_text  # original kept as .bak by the save

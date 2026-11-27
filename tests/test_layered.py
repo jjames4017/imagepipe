@@ -137,7 +137,7 @@ def test_move_listed_keeps_folders_and_follows_in_triage(tmp_path):
     assert not (root / "file cabinet" / "a").exists()  # emptied folders removed
     assert (root / "file cabinet" / "b" / "plain.tif").exists()  # not on the list: stays
     row = t.db.execute("SELECT * FROM files").fetchone()
-    assert row["current_path"] == str(to / "file cabinet" / "a" / "poster.psd") and row["bucket"] == "sorted/specials"
+    assert row["current_path"] == str(to / "file cabinet" / "a" / "poster.psd") and row["bucket"] == "specials"
     assert t.actions and t.actions[0][0] == "moved"
     again = layered.move_listed(csv_path, root, to, tmp_path / "reports")
     assert again["missing"] == 3  # already moved: skipped, nothing overwritten

@@ -437,6 +437,19 @@ function renderForm(data) {
       } else if (f.type === "group") {
         const g = base[f.key] || {};
         out.push(fieldRow(f, f.fields.map(sub => `<div class="row"><span style="width:200px" class="muted">${esc(sub.label)}</span>${inputFor(sub, g[sub.key], [...path, sub.key])}</div>`).join("")));
+      } else if (f.type === "readonly") {
+        const v = (META.env || {})[f.env] || "";
+        out.push(fieldRow(f, v ? `<code>${esc(v)}</code>` : `<span style="color:var(--warn)">not set - add ${esc(f.env)} to the compose file</span>`));
+      } else if (f.type === "categories") {
+        const cats = base[f.key] || f.default || {};
+        const rowHtml = (name, c) => `<div class="row" data-catrow style="align-items:flex-start">
+          <input type="text" value="${esc(name)}" placeholder="category" style="min-width:130px;width:130px">
+          <select title="pipeline">${f.choices.map(p => `<option ${p === (c.pipeline || "none") ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>
+          <textarea rows="2" placeholder="extensions, separated by spaces" style="flex:1;min-width:260px">${esc((c.extensions || []).join(" "))}</textarea>
+          <button class="b danger" type="button" data-remove-cat>Remove</button></div>`;
+        out.push(fieldRow(f, `<div data-cats="${esc(path.join("."))}">${Object.entries(cats).map(([k, c]) => rowHtml(k, c)).join("")}</div>
+          <button class="b" type="button" data-addcat="${esc(path.join("."))}">Add category</button>
+          <template data-cattpl="${esc(path.join("."))}">${rowHtml("", {pipeline: "none", extensions: []})}</template>`));
       } else if (f.type === "map") {
         const m = base[f.key] || {};
         const rowHtml = (k, v) => `<div class="row" data-maprow><input type="text" value="${esc(k)}" placeholder="extension" style="min-width:120px;width:120px">
@@ -457,6 +470,8 @@ function renderForm(data) {
     const t = e.target;
     if (t.matches("[data-remove]")) t.closest(".rec").remove();
     if (t.matches("[data-remove-row]")) t.closest("[data-maprow]").remove();
+    if (t.matches("[data-remove-cat]")) t.closest("[data-catrow]").remove();
+    if (t.matches("[data-addcat]")) { const p = t.dataset.addcat; $(`[data-cats="${p}"]`).insertAdjacentHTML("beforeend", $(`[data-cattpl="${p}"]`).innerHTML); }
     if (t.matches("[data-addmap]")) { const p = t.dataset.addmap; $(`[data-map="${p}"]`).insertAdjacentHTML("beforeend", $(`[data-maptpl="${p}"]`).innerHTML); }
     if (t.matches("[data-add]")) {
       const p = t.dataset.add, [sec, key] = p.includes(".") ? p.split(".") : [null, p];
@@ -491,6 +506,14 @@ function collectForm() {
       } else if (f.type === "group") {
         target[f.key] = {};
         f.fields.forEach(sub => { const el = $(`[data-path="${path}.${sub.key}"]`, card); target[f.key][sub.key] = readValue(el); });
+      } else if (f.type === "readonly") {
+        // comes from the compose file; never written to the config
+      } else if (f.type === "categories") {
+        const cats = {};
+        $$(`[data-cats="${path}"] [data-catrow]`, card).forEach(row => { const k = $("input", row).value.trim().toLowerCase();
+          if (k) cats[k] = {pipeline: $("select", row).value,
+                            extensions: $("textarea", row).value.split(/[\s,]+/).map(x => x.trim().toLowerCase().replace(/^\./, "")).filter(Boolean)}; });
+        target[f.key] = cats;
       } else if (f.type === "map") {
         const m = {};
         $$(`[data-map="${path}"] [data-maprow]`, card).forEach(row => { const k = $("input", row).value.trim().replace(/^\./, "");

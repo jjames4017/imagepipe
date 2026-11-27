@@ -3,14 +3,42 @@
 Triage sorts large mixed folder trees (photos, documents, archives and
 everything else) before anything enters the pipeline. Every file is
 identified by its contents, given a pipeline ID and a new name, and moved to
-one place:
+one category folder under `<filestack>/sorted/`:
 
-| Destination | What goes there |
+| Folder | What goes there |
 |---|---|
-| `imagepipe/` | Photos and RAW files, with their sidecars (XMP, AAE, Google Takeout JSON) and Live Photo clips. Exact duplicates all go - ImagePipe dedupes them |
-| `docupipe/` | Documents and PDFs, staged for review before Paperless. Duplicates all go |
+| `sorted/images/` | Photos, with their sidecars (XMP, AAE, Google Takeout JSON) and Live Photo clips. Picked up by ImagePipe. Exact duplicates all go - ImagePipe dedupes them |
+| `sorted/raw/` | RAW files, with their sidecars. Picked up by ImagePipe |
+| `sorted/documents/` | Documents and PDFs, waiting for review before Paperless. Duplicates all go |
 | `sorted/<type>/` | `video`, `audio`, `software`, `disk-images`, `email`, `ebooks`, `code`, `fonts`, `other-known`, `web-pages`, `specials`. Duplicates all go |
-| `quarantine/<reason>/` | `unknown-type`, `corrupt`, `encrypted`, `archive-failed`, `zero-byte`, `system-junk` |
+| `sorted/quarantine/<reason>/` | `unknown-type`, `corrupt`, `encrypted`, `archive-failed`, `zero-byte`, `system-junk` |
+
+The categories and the extensions in each can be changed (see
+[Categories](#categories)). Each category also says which pipeline picks it up,
+or none: then the folder is the files' final place.
+
+### The filestack
+
+Everything triage and ImagePipe work on lives under one folder, the
+**filestack**, set by `IMAGEPIPE_FILESTACK` in the compose file (it is shown
+read-only in the web UI and can only be changed there):
+
+```
+<filestack>/
+├── triage/work/          archives are extracted here
+├── imagepipe/            ImagePipe's working folders (processing, a-eye, digikam, ready)
+└── sorted/
+    ├── images/ raw/ documents/ video/ audio/ ... specials/ raw-processed/
+    ├── quarantine/<reason>/
+    └── excluded/<reason>/   photos ImagePipe takes out of the flow
+```
+
+**Same-mount rule.** The triage sources and the filestack must be inside the
+**same container mount**. Linux refuses hard links and renames between two
+mounts, even when both are on the same ZFS dataset or disk, so with separate
+mounts every move silently becomes a copy, a checksum and a delete. Mount the
+parent folder once (e.g. `/wolf-pool/vault` at the same path) and point
+`IMAGEPIPE_FILESTACK` at a folder inside it.
 
 Archives are extracted, every file inside is checked, the contents are sorted
 like any other file, and only then is the archive deleted.
@@ -20,9 +48,9 @@ folder named after the source:
 
 ```
 /wolf-pool/vault/photos/2014/Bali/IMG_1234.jpg
-  -> /wolf-pool/vault/imagepipe/photos/2014/Bali/IP1M8B3GMSNJ49HBXT_2014-07-12_Denpasar-ID-Bali.jpg
+  -> /wolf-pool/vault/filestack/sorted/images/photos/2014/Bali/IP1M8B3GMSNJ49HBXT_2014-07-12_Denpasar-ID-Bali.jpg
 /wolf-pool/vault/file cabinet/Holidays/Fiji 2010.zip  (contains day1/photo1.jpg)
-  -> /wolf-pool/vault/imagepipe/file cabinet/Holidays/Fiji 2010/day1/IP..._2010_Fiji-day1.jpg
+  -> /wolf-pool/vault/filestack/sorted/images/file cabinet/Holidays/Fiji 2010/day1/IP..._2010_Fiji-day1.jpg
 ```
 
 ## Commands
@@ -34,6 +62,7 @@ folder named after the source:
 | `imagepipe triage apply [--limit N]` | Carries out the plan | **Yes - moves files** |
 | `imagepipe triage status` | Counts by status and bucket, recent runs | No |
 | `imagepipe triage export-csv` | Every file in the triage database, one CSV | No |
+| `imagepipe triage relocate [--dry-run]` | Moves files sorted before 0.4 from the old folders into the filestack | **Yes - moves files** |
 
 Run them in the foreground (`docker compose run --rm imagepipe triage ...`) so
 the live progress shows. Every phase shows a running count, rate and elapsed
@@ -281,42 +310,43 @@ private-use range (U+F780-U+F7FF).
 
 ## Rules
 
-The bucket for each file, in order:
+The bucket (category, or `quarantine/<reason>`) for each file, in order:
 
 | Rule | Bucket |
 |---|---|
 | empty file | `quarantine/zero-byte` |
 | `.DS_Store`, `Thumbs.db`, `photothumb.db`, `desktop.ini`, `._*` and similar | `quarantine/system-junk` |
 | can't be read | `quarantine/corrupt` |
-| extension listed in `bucket_overrides` | as configured |
+| extension moved to another category in `categories` | that category |
 | `.tmp`, `.crdownload`, `.asd`, `.wbk`, and Office lock files (`~$...`) | `quarantine/system-junk` |
 | the extension promises an image/RAW/video/audio/PDF but the contents are text, HTML or unknown | `quarantine/corrupt` |
-| image or RAW | `imagepipe` |
-| XMP/AAE/THM sidecar, Takeout JSON | with its photo; `imagepipe` if its photo isn't found |
+| image | `images` |
+| RAW | `raw` |
+| XMP/AAE/THM sidecar, Takeout JSON | with its photo; `images` if its photo isn't found |
 | short video beside a same-named photo (Live Photo) | with its photo |
-| PDF | `docupipe` |
-| design / vector files (`.psd .psb .xcf .kra .afdesign .afphoto .indd .svg .svgz .eps .ai .cdr .wmf .emf .ps .dxf .dwg`), `.mpo`, `.ico`, and TIFFs that are multi-page, layered or unreadable | `sorted/specials` (reviewed one by one) |
-| saved web page and its `_files` folder, `.mht` | `sorted/web-pages` |
-| Word, Excel, PowerPoint, OpenDocument, Pages/Numbers/Keynote, RTF, text, Markdown, CSV, HTML (by extension) | `docupipe` |
+| PDF | `documents` |
+| design / vector files (`.psd .psb .xcf .kra .afdesign .afphoto .indd .svg .svgz .eps .ai .cdr .wmf .emf .ps .dxf .dwg`), `.mpo`, `.ico`, and TIFFs that are multi-page, layered or unreadable | `specials` (reviewed one by one) |
+| saved web page and its `_files` folder, `.mht` | `web-pages` |
+| Word, Excel, PowerPoint, OpenDocument, Pages/Numbers/Keynote, RTF, text, Markdown, CSV, HTML (by extension) | `documents` |
 | document content under an extension triage doesn't know (e.g. `.tibuq6`) | `quarantine/unknown-type` |
-| video, audio | `sorted/video`, `sorted/audio` |
+| video, audio | `video`, `audio` |
 | archive with a real archive extension | extracted (see above) |
 | archive content under any other unknown extension | `quarantine/unknown-type` |
-| known extension (email, ebooks, software, disk images, fonts, code, other known data files) | `sorted/<type>` |
+| known extension (email, ebooks, software, disk images, fonts, code, other known data files) | that category |
 | anything else | `quarantine/unknown-type` |
 
 ## Configuration
 
-The `triage:` section of the config file. Paths are as the container sees
-them; mount `/wolf-pool/vault` at the same path so they match the host.
+The `triage:` section of the config file, plus `IMAGEPIPE_FILESTACK` in the
+compose file (see [The filestack](#the-filestack)). Paths are as the container
+sees them; mount `/wolf-pool/vault` at the same path so they match the host.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `database` | required | Triage database file |
 | `log_dir`, `reports_dir` | required | Logs; reports and `actions.csv` |
-| `work_dir` | required | Where archives are extracted. Put it on the same file system as the destinations |
 | `sources` | required | `name`, `path`, optional `exclude` (glob patterns) |
-| `destinations` | required | `imagepipe`, `docupipe`, `sorted`, `quarantine` |
+| `categories` | built in | Category name -> `pipeline` (`none` or `imagepipe`) and `extensions`. See below |
 | `workers` | 8 | Parallel readers |
 | `verify` | `auto` | `auto`: inode check for same-disk moves, SHA-256 for copies. `hash`: SHA-256 always |
 | `embed_metadata` | `[]` (off) | Kinds to write the ID into (`image`, `pdf`, `video`) - see above |
@@ -326,9 +356,51 @@ them; mount `/wolf-pool/vault` at the same path so they match the host.
 | `max_archive_depth` | 5 | Archives inside archives |
 | `max_extract_bytes` | `200GB` | Largest unpacked size |
 | `smartname_max_length` | 80 | Characters |
-| `bucket_overrides` | `{}` | Extension to bucket, e.g. `{json: docupipe}` |
+The filestack and the sources must not sit inside each other.
 
-Destinations, `work_dir` and sources must not sit inside each other.
+### Categories
+
+Without `categories` in the config, triage uses the built-in list: `images`,
+`raw`, `documents`, `video`, `audio`, `ebooks`, `email`, `code`, `fonts`,
+`software`, `disk-images`, `web-pages`, `other-known`, `specials`,
+`raw-processed`. `images` and `raw` go to ImagePipe; the rest to no pipeline.
+Edit them in the web UI (Settings -> Triage -> Categories) or in the file:
+
+```yaml
+triage:
+  categories:
+    images: {pipeline: imagepipe, extensions: [jpg, jpeg, png, heic, ...]}
+    documents: {pipeline: none, extensions: [pdf, docx, json, ...]}   # json moved here from other-known
+```
+
+- An extension can be in only one category. Moving one to another category
+  sends files with that extension there; checks for empty, junk, unreadable,
+  encrypted and mislabelled files still come first.
+- One pipeline per category. `quarantine`, `excluded` and `extract` can't be
+  category names.
+- Files of content triage recognises without the extension (a photo, a PDF, a
+  video) go to `images`, `raw`, `documents`, `video` or `audio` unless their
+  extension was moved.
+
+### Moving from the layout before 0.4
+
+Before 0.4 the config had `work_dir` and `destinations` (`imagepipe`,
+`docupipe`, `sorted`, `quarantine`). Those keys still load (the web UI keeps
+them when it saves) so that `imagepipe triage relocate` knows where files are:
+
+| Old place | New place |
+|---|---|
+| `<imagepipe>/...` | `<filestack>/sorted/images/...`, RAW files (and their companions) `sorted/raw/...` |
+| `<docupipe>/...` | `<filestack>/sorted/documents/...` |
+| `<sorted>/<type>/...` | `<filestack>/sorted/<type>/...` |
+| `<quarantine>/<reason>/...` | `<filestack>/sorted/quarantine/<reason>/...` |
+
+Folders below are kept exactly. Moves are the same safe move as apply, the
+triage database follows every file (with a `relocated` action), and every
+move is listed in `reports_dir/relocate-<time>/moves.csv`. Files under the old
+folders that triage has no record of are moved by the same rules. Old folders
+left empty are removed. Run `--dry-run` first; afterwards run `triage plan`
+again, and delete the old keys from the config.
 
 ## Dependencies
 

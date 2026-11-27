@@ -6,7 +6,7 @@ disagree, this page describes the intent.
 ## Never delete
 
 - No stage ever deletes a photo or PDF. A file taken out of the flow is moved to
-  `/excluded/<reason>/` - see [Excluded reasons](excluded-reasons.md).
+  `<filestack>/sorted/excluded/<reason>/` - see [Excluded reasons](excluded-reasons.md).
 - Excluded folders are **flat**: the original folder structure is not recreated.
   Each file is renamed `<pipelineID>_<original name>` so names never clash and
   each file points straight at its record.
