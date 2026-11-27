@@ -77,12 +77,9 @@ TRIAGE = [
     {"key": "max_archive_depth", "type": "int", "label": "Archives inside archives, depth", "default": 5},
     {"key": "max_extract_bytes", "type": "size", "label": "Largest unpacked archive", "default": "200GB"},
     {"key": "smartname_max_length", "type": "int", "label": "Smartname length", "default": 80},
-    {"key": "pdf_photo_coverage", "type": "int", "label": "PDF check: photo page coverage (%)", "default": 60,
-     "help": "Triage: check PDFs. A page is a photo page when ScanSplitter's photos cover at least this much of "
-             "it and it has little text"},
-    {"key": "pdf_text_chars", "type": "int", "label": "PDF check: little text (characters)", "default": 50,
-     "help": "Fewer letters and digits than this on a page (text layer, or OCR when there is no text layer) "
-             "counts as little or no text; this many or more is substantial text"},
+    {"key": "pdf_text_words", "type": "int", "label": "PDF check: words that make a document", "default": 7,
+     "help": "Triage: check PDFs. A PDF with any page holding more words than this (text layer, or OCR when the "
+             "text layer has fewer) is a document and never goes to ScanSplitter. A word is 2 or more letters/digits"},
 ]
 
 TOOLS = [

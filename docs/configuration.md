@@ -65,6 +65,6 @@ categories whose pipeline is `imagepipe`).
 | `burst_min` | `3` | ...when there are at least this many (flagged only) |
 | `low_res_pixels` | `1000` | A photo whose long edge is shorter is flagged low resolution |
 
-The PDF check's two settings are in the `triage` section: `pdf_photo_coverage`
-(%, default 60) and `pdf_text_chars` (default 50) - see
-[Check PDFs](stages/triage.md#check-pdfs).
+The PDF check's setting is in the `triage` section: `pdf_text_words` (default
+7) - see [Check PDFs](stages/triage.md#check-pdfs). (`pdf_photo_coverage` and
+`pdf_text_chars` from 0.5.0-0.5.1 are still accepted but no longer used.)

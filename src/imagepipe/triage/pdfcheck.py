@@ -1,26 +1,25 @@
 """Triage: check PDFs (#58).
 
-Looks at every PDF in <filestack>/sorted/documents and decides, page by page, whether it
-is a document or a photo scan:
+Looks at every PDF in <filestack>/sorted/documents and decides whether it is a document or
+a photo scan:
 
-- photo page: ScanSplitter finds photos covering at least `pdf_photo_coverage` % of the
-  page, and the page has little or no text (fewer than `pdf_text_chars` letters/digits in
-  its text layer, or by OCR when the text layer has little)
-- document page: substantial text and no photos
-- anything else: uncertain
+- document: any page has more than `pdf_text_words` words (default 7) - in its text layer,
+  or by OCR when the text layer has fewer. Checking stops at the first such page, and the
+  PDF never goes to ScanSplitter. It stays where it is.
+- otherwise the PDF goes to ScanSplitter: photos found on every page -> a photo PDF, split;
+  any page without photos (or where detection failed) -> uncertain, moved to
+  <filestack>/sorted/quarantine/pdf-uncertain/.
 
-A PDF whose pages are all photo pages is split by ScanSplitter. All document pages: it
-stays where it is. A mix, or any uncertain page: <filestack>/sorted/quarantine/pdf-uncertain/.
+A word is a run of 2 or more letters or digits, so OCR specks on a photo don't count.
 
-Photo-page PDFs go into a ScanSplitter project (one per run). Pages ScanSplitter raised no
-CHECK flag for are approved by ImagePipe and their photos exported to
-<filestack>/sorted/images/. Pages with a CHECK flag wait for you to review them in
-ScanSplitter's Projects page; every later run exports the pages you approved. When every
-page is done, the PDF moves to <filestack>/sorted/excluded/pdf-source/. ScanSplitter's
-own Deliver is never used.
+Photo PDFs go into a ScanSplitter project (one per run). Pages ScanSplitter raised no CHECK
+flag for are approved by ImagePipe and their photos exported to <filestack>/sorted/images/.
+Pages with a CHECK flag wait for you to review them in ScanSplitter's Projects page; every
+later run exports the pages you approved. When every page is done, the PDF moves to
+<filestack>/sorted/excluded/pdf-source/. ScanSplitter's own Deliver is never used.
 
-A page that has substantial text and no embedded images at all is a document page without
-asking ScanSplitter (it can't hold a photo). Every other page goes through ScanSplitter.
+PDFs ScanSplitter can't take (over 200 MB or 200 pages, or a page too big for it to decode)
+are left where they are, listed as too large, and not tried again.
 """
 
 from __future__ import annotations
@@ -50,7 +49,8 @@ from imagepipe.triage.apply import MoveError, free_name, sha256_of, transfer
 
 log = logging.getLogger("imagepipe")
 OCR_DPI = 150
-_ALNUM = re.compile(r"[^\W_]", re.UNICODE)
+_WORD = re.compile(r"[^\W_]{2,}", re.UNICODE)
+logging.getLogger("pypdf").setLevel(logging.ERROR)  # "Ignoring wrong pointing object ...": harmless, noisy
 
 
 def say(msg: str) -> None:
@@ -58,8 +58,8 @@ def say(msg: str) -> None:
     log.info(msg)
 
 
-def count_chars(text: str | None) -> int:
-    return len(_ALNUM.findall(text or ""))
+def count_words(text: str | None) -> int:
+    return len(_WORD.findall(text or ""))
 
 
 def tools_missing() -> list[str]:
@@ -72,8 +72,8 @@ def tools_missing() -> list[str]:
 
 
 # -- reading a PDF --------------------------------------------------------------------
-def read_pages(path: Path) -> list[dict]:
-    """[{page, text_chars, has_images}] from the PDF's own text layer and resources."""
+def page_texts(path: Path):
+    """(number of pages, iterator of (page, words in its text layer))."""
     from pypdf import PdfReader
 
     reader = PdfReader(str(path))
@@ -82,46 +82,38 @@ def read_pages(path: Path) -> list[dict]:
             reader.decrypt("")
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"encrypted: {exc}") from exc
-    pages = []
-    for i, page in enumerate(reader.pages, 1):
-        try:
-            text = page.extract_text() or ""
-        except Exception:  # noqa: BLE001 - a broken text layer counts as none
-            text = ""
-        try:
-            has_images = len(page.images) > 0
-        except Exception:  # noqa: BLE001 - can't tell: let ScanSplitter look
-            has_images = True
-        pages.append({"page": i, "text_chars": count_chars(text), "has_images": has_images})
-    return pages
+
+    def pages():
+        for i, page in enumerate(reader.pages, 1):
+            try:
+                text = page.extract_text() or ""
+            except Exception:  # noqa: BLE001 - a broken text layer counts as none
+                text = ""
+            yield i, count_words(text)
+
+    return len(reader.pages), pages()
 
 
-def ocr_chars(path: Path, page: int) -> int:
-    """Letters/digits Tesseract reads on one page (rendered at OCR_DPI)."""
+def ocr_words(path: Path, page: int) -> int:
+    """Words Tesseract reads on one page (rendered at OCR_DPI)."""
     render = subprocess.run(["pdftoppm", "-r", str(OCR_DPI), "-f", str(page), "-l", str(page), "-gray", "-png",
                              str(path)], capture_output=True, timeout=600)
     if render.returncode != 0 or not render.stdout:
         return 0
     ocr = subprocess.run(["tesseract", "stdin", "stdout", "--psm", "3"], input=render.stdout,
                          capture_output=True, timeout=600)
-    return count_chars(ocr.stdout.decode("utf-8", "replace"))
+    return count_words(ocr.stdout.decode("utf-8", "replace"))
 
 
-def page_verdict(text: int, cover: float | None, boxes: int, little_below: int, cover_min: float) -> str:
-    little = text < little_below
-    if little and cover is not None and cover >= cover_min:
-        return "photo"
-    if not little and boxes == 0:
-        return "document"
-    return "uncertain"
+def page_verdict(boxes: int, failed: bool = False) -> str:
+    """A page of a PDF with no wordy page: photos found -> photo, else uncertain."""
+    return "photo" if boxes > 0 and not failed else "uncertain"
 
 
 def pdf_verdict(pages: list[dict]) -> str:
     kinds = {p["verdict"] for p in pages}
     if kinds == {"photo"}:
         return "photo-pages"
-    if kinds == {"document"}:
-        return "document"
     return "uncertain"
 
 
@@ -308,76 +300,92 @@ class PdfChecker:
     def check_one(self, pdf: Path, prog) -> None:
         st = pdf.stat()
         base = {"size": st.st_size, "mtime": st.st_mtime, "checked_at": self.db.now()}
+        limit = self.tc.pdf_text_words
         try:
-            pages = read_pages(pdf)
+            count, texts = page_texts(pdf)
+            pages = []
+            for n, words in texts:
+                p = {"page": n, "text_words": words, "ocr_words": None}
+                if words <= limit:
+                    prog.set_extra(f"{pdf.name}: OCR page {n}/{count}")
+                    p["ocr_words"] = ocr_words(pdf, n)
+                pages.append(p)
+                if max(words, p["ocr_words"] or 0) > limit:  # a page of text: a document, stop here
+                    p["verdict"] = "document"
+                    break
+        except (subprocess.SubprocessError, OSError):
+            raise
         except Exception as exc:  # noqa: BLE001
             self.save(pdf, **base, verdict="unreadable", state="done", final_path=str(pdf),
                       note=f"pypdf can't read it: {type(exc).__name__}: {exc}"[:500])
             self.bump("unreadable")
             return
-        little, cover_min = self.tc.pdf_text_chars, self.tc.pdf_photo_coverage / 100
-        for p in pages:
-            p["ocr_chars"] = None
-            if p["text_chars"] < little:
-                prog.set_extra(f"{pdf.name}: OCR page {p['page']}/{len(pages)}")
-                p["ocr_chars"] = ocr_chars(pdf, p["page"])
-            p["text"] = max(p["text_chars"], p["ocr_chars"] or 0)
-        need_ss = [p for p in pages if p["has_images"]]
-        scans: dict[int, dict] = {}
-        project = None
-        if need_ss:
-            if st.st_size > MAX_UPLOAD_BYTES or len(pages) > MAX_PDF_PAGES:
-                self.save(pdf, **base, pages=len(pages), verdict="too-large", state="done", final_path=str(pdf),
-                          page_detail=pages, note="over ScanSplitter's limit (200 MB, 200 pages) - left where it is")
-                self.bump("too-large")
-                return
-            project = self.run_project()
-            ss = self.scansplitter()
+        if count == 0:
+            self.save(pdf, **base, verdict="unreadable", state="done", final_path=str(pdf), note="no pages")
+            self.bump("unreadable")
+            return
+        if pages and pages[-1].get("verdict") == "document":
+            self.bump("verdict:document")
+            self.save(pdf, **base, pages=count, verdict="document", state="done", page_detail=pages,
+                      ss_project=None, ss_scans=None, final_path=str(pdf),
+                      note=f"page {pages[-1]['page']} has more than {limit} words")
+            return
+        # no page with words: only now ScanSplitter looks for photos
+        if st.st_size > MAX_UPLOAD_BYTES or count > MAX_PDF_PAGES:
+            self.too_large(pdf, base, count, pages, "over ScanSplitter's limit (200 MB, 200 pages)")
+            return
+        project = self.run_project()
+        ss = self.scansplitter()
+        try:
             uploaded = ss.add_pdf(project, pdf)
-            sids = [s["id"] for s in uploaded]
-            self.save(pdf, **base, pages=len(pages), state="checking", ss_project=project,
-                      ss_scans=[{"sid": s["id"], "page": s.get("page") or 1} for s in uploaded])
-            done = ss.wait_detection(project, sids, tick=lambda t: prog.set_extra(f"{pdf.name}: {t}"))
-            scans = {int(s.get("page") or 1): s for s in done.values()}
+        except ScanSplitterError as exc:
+            if "HTTP 413" in str(exc) or "pixel limit" in str(exc):
+                self.too_large(pdf, base, count, pages, f"ScanSplitter refused it: {str(exc)[-160:]}")
+                return
+            raise
+        sids = [s["id"] for s in uploaded]
+        self.save(pdf, **base, pages=count, state="checking", ss_project=project,
+                  ss_scans=[{"sid": s["id"], "page": s.get("page") or 1} for s in uploaded])
+        done = ss.wait_detection(project, sids, tick=lambda t: prog.set_extra(f"{pdf.name}: {t}"))
+        scans = {int(s.get("page") or 1): s for s in done.values()}
         for p in pages:
             scan = scans.get(p["page"])
             p["boxes"] = len(scan.get("boxes") or []) if scan else 0
             p["coverage"] = round(coverage(scan), 3) if scan else None
             p["flags"] = [f.get("code") for f in scan.get("flags") or []] if scan else []
-            if scan and scan.get("status") == "failed":
-                p["verdict"] = "uncertain"
+            failed = bool(scan and scan.get("status") == "failed")
+            if failed:
                 p["why"] = "ScanSplitter detection failed"
-            else:
-                p["verdict"] = page_verdict(p["text"], p["coverage"], p["boxes"], little, cover_min)
+            p["verdict"] = page_verdict(p["boxes"], failed)
         verdict = pdf_verdict(pages)
         self.bump(f"verdict:{verdict}")
         if verdict != "photo-pages":
-            if scans:  # not a photo PDF: take its pages out of the review list again
-                for s in scans.values():
-                    try:
-                        self.scansplitter().delete_scan(project, s["id"])
-                    except ScanSplitterError:
-                        pass
-            final = pdf
-            if verdict == "uncertain":
-                final = self.move(pdf, self.tc.bucket_dir("quarantine/pdf-uncertain"), "pdf-uncertain",
-                                  summary(pages))
-            self.save(pdf, **base, pages=len(pages), verdict=verdict, state="done", page_detail=pages,
+            for s in scans.values():  # not a photo PDF: take its pages out of the review list again
+                try:
+                    ss.delete_scan(project, s["id"])
+                except ScanSplitterError:
+                    pass
+            final = self.move(pdf, self.tc.bucket_dir("quarantine/pdf-uncertain"), "pdf-uncertain", summary(pages))
+            self.save(pdf, **base, pages=count, verdict=verdict, state="done", page_detail=pages,
                       ss_project=None, ss_scans=None, final_path=str(final), note=summary(pages))
             return
         # photo pages: approve the pages ScanSplitter is sure about, then export what's approved
-        ss = self.scansplitter()
         entries = []
         for page_no, scan in sorted(scans.items()):
             if scan.get("boxes") and not scan.get("flags"):
                 ss.approve(project, scan["id"])
             entries.append({"sid": scan["id"], "page": page_no, "exported": False, "files": []})
         checks = sum(1 for s in scans.values() if s.get("flags"))
-        self.save(pdf, **base, pages=len(pages), verdict=verdict, state="waiting-review", page_detail=pages,
+        self.save(pdf, **base, pages=count, verdict=verdict, state="waiting-review", page_detail=pages,
                   ss_project=project, ss_scans=entries, final_path=str(pdf),
-                  note=f"{len(pages) - checks} page(s) approved automatically, {checks} with a CHECK flag")
+                  note=f"{count - checks} page(s) approved automatically, {checks} with a CHECK flag")
         row = self.db.db.execute("SELECT * FROM pdf_checks WHERE path=?", (to_db(str(pdf)),)).fetchone()
         self.export_ready(row, prog)
+
+    def too_large(self, pdf: Path, base: dict, count: int, pages: list, why: str) -> None:
+        self.save(pdf, **base, pages=count, verdict="too-large", state="done", final_path=str(pdf),
+                  page_detail=pages, note=f"{why} - left where it is")
+        self.bump("too-large")
 
     def run(self, limit: int | None = None) -> dict:
         missing = tools_missing()
@@ -396,6 +404,7 @@ class PdfChecker:
             with Progress("Check PDFs", total=len(todo), total_bytes=total_bytes, unit="PDFs") as prog:
                 for pdf in todo:
                     prog.set_extra(pdf.name)
+                    size = pdf.stat().st_size
                     try:
                         self.check_one(pdf, prog)
                     except ScanSplitterDown:
@@ -413,7 +422,7 @@ class PdfChecker:
                         self.save(pdf, state="error", size=None, mtime=None, ss_scans=None,
                                   note=f"{type(exc).__name__}: {exc}"[:500])
                         self.bump("errors")
-                    prog.update(1, pdf.stat().st_size if pdf.exists() else 0)
+                    prog.update(1, size)
         except ScanSplitterDown:
             status = "failed"
             raise

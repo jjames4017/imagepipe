@@ -175,13 +175,24 @@ def setup(tmp_path, fake_ss, monkeypatch):
 
 
 def test_verdict_rules():
-    assert page_verdict(0, 0.8, 1, 50, 0.6) == "photo"
-    assert page_verdict(0, 0.3, 1, 50, 0.6) == "uncertain"      # photo too small
-    assert page_verdict(500, None, 0, 50, 0.6) == "document"
-    assert page_verdict(500, 0.9, 2, 50, 0.6) == "uncertain"    # text and photos
-    assert page_verdict(10, None, 0, 50, 0.6) == "uncertain"    # blank-ish page
+    assert page_verdict(1) == "photo"
+    assert page_verdict(0) == "uncertain"
+    assert page_verdict(2, failed=True) == "uncertain"
     assert pdf_verdict([{"verdict": "photo"}] * 2) == "photo-pages"
-    assert pdf_verdict([{"verdict": "photo"}, {"verdict": "document"}]) == "uncertain"
+    assert pdf_verdict([{"verdict": "photo"}, {"verdict": "uncertain"}]) == "uncertain"
+    assert pdfcheck.count_words("a 1 ab cd3 -- x_y hello") == 3
+
+
+@needs_tools
+def test_text_pdf_never_goes_to_scansplitter(setup):
+    cfg, docs, stack = setup
+    (docs / "letter.pdf").write_bytes(text_pdf())
+    (docs / "short.pdf").write_bytes(text_pdf("Page one only"))  # 3 words: not a document by words
+    FakeSS.plan = {"short.pdf": [([], [])]}
+    res = pdfcheck.run_pdf_check(cfg)
+    assert res["stats"]["verdict:document"] == 1 and res["stats"]["verdict:uncertain"] == 1
+    assert (docs / "letter.pdf").exists()
+    assert (stack / "sorted/quarantine/pdf-uncertain/box1/short.pdf").exists()
 
 
 @needs_tools
@@ -236,3 +247,20 @@ def test_limit(setup):
     assert res["stats"]["verdict:document"] == 2
     res = pdfcheck.run_pdf_check(cfg, limit=2)
     assert res["stats"]["verdict:document"] == 1
+
+
+@needs_tools
+def test_page_too_big_for_scansplitter(setup, monkeypatch):
+    cfg, docs, stack = setup
+    (docs / "chart.pdf").write_bytes(image_pdf(1))
+    from imagepipe.scansplitter import ScanSplitter, ScanSplitterError
+
+    def refuse(self, pid, path):
+        raise ScanSplitterError("POST ...: HTTP 400 {\"detail\":\"PDF page exceeds the decoded-pixel limit\"}")
+
+    monkeypatch.setattr(ScanSplitter, "add_pdf", refuse)
+    res = pdfcheck.run_pdf_check(cfg)
+    assert res["stats"] == {"too-large": 1}
+    assert (docs / "chart.pdf").exists()
+    res = pdfcheck.run_pdf_check(cfg)          # not tried again
+    assert res["stats"] == {}

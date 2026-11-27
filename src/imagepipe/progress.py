@@ -122,7 +122,7 @@ class Progress:
             parts.append(f"{count:,}/{self.total:,} {self.unit} ({pct:5.1f}%)")
         else:
             parts.append(f"{count:,} {self.unit}")
-        parts.append(f"{rate:,.0f} {self.unit}/s")
+        parts.append(f"{rate:,.2f} {self.unit}/s" if 0 < rate < 1 else f"{rate:,.0f} {self.unit}/s")
         if nbytes or self.total_bytes:
             if self.total_bytes:
                 parts.append(f"{fmt_bytes(nbytes)}/{fmt_bytes(self.total_bytes)} @ {fmt_bytes(bps)}/s")
