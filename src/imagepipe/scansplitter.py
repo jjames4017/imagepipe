@@ -70,6 +70,9 @@ class ScanSplitter:
     def project(self, pid: str) -> dict:
         return self._call("GET", f"/api/projects/{pid}")
 
+    def update_settings(self, pid: str, settings: dict) -> dict:
+        return self._call("PATCH", f"/api/projects/{pid}", {"settings": settings})
+
     def delete_project(self, pid: str) -> None:
         self._call("DELETE", f"/api/projects/{pid}")
 

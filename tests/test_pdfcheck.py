@@ -130,8 +130,12 @@ class FakeSS(BaseHTTPRequestHandler):
         self._send(404, {"detail": "no"})
 
     def do_PATCH(self):
-        m = re.match(r"^/api/projects/([^/]+)/scans/([^/]+)$", self.path)
         body = json.loads(self._body())
+        m = re.match(r"^/api/projects/([^/]+)$", self.path)
+        if m:
+            self.projects[m.group(1)]["settings"] = body["settings"]
+            return self._send(200, self.projects[m.group(1)])
+        m = re.match(r"^/api/projects/([^/]+)/scans/([^/]+)$", self.path)
         scan = next(s for s in self.projects[m.group(1)]["scans"] if s["id"] == m.group(2))
         scan["status"] = body["status"]
         self._send(200, scan)
@@ -289,3 +293,21 @@ def test_unreadable_to_quarantine_and_left_behind_moved(setup):
     res = pdfcheck.run_pdf_check(cfg)
     assert res["stats"] == {"moved-to-quarantine:too-large": 1}
     assert (q / "old.pdf").exists() and not (docs / "old.pdf").exists()
+
+
+@needs_tools
+def test_project_settings_and_max_pdfs(setup):
+    cfg, docs, stack = setup
+    cfg.tools.scansplitter.max_pdfs_per_project = 2
+    for n in range(3):
+        (docs / f"album{n}.pdf").write_bytes(image_pdf(1))
+        FakeSS.plan[f"album{n}.pdf"] = [([(900, 900)], ["edge"])]   # all wait for review
+    res = pdfcheck.run_pdf_check(cfg)
+    assert res["stats"]["verdict:photo-pages"] == 3
+    projects = list(FakeSS.projects.values())
+    assert [len(p["scans"]) for p in projects] == [2, 1]
+    assert projects[1]["name"].endswith("(2)")
+    want = cfg.tools.scansplitter.project_settings()
+    assert all(p["settings"] == want for p in projects)
+    assert want["min_area_ratio"] == 2.0 and want["max_area_ratio"] == 100.0 and want["quality"] == 100
+    assert want["auto_deskew"] and want["restore_color"] and want["upscale_2x"] and not want["include_gps"]
