@@ -42,3 +42,10 @@ One file, `<reports_dir>/excluded.csv`, appended one row per excluded file:
 | `similarity` | For similar duplicates: the similarity % |
 | `width`, `height`, `size` | Of the excluded file |
 | `timestamp` | When it was excluded |
+
+## From triage
+
+| Folder | Why |
+|---|---|
+| `sorted/excluded/triage-duplicate/` | Byte-identical copy of a file triage kept elsewhere - see [Remove duplicates](stages/triage.md#remove-duplicates) |
+| `sorted/excluded/pdf-source/` | A photo PDF whose pages were split into photos - see [Check PDFs](stages/triage.md#check-pdfs) |

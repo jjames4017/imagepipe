@@ -59,6 +59,8 @@ triage:
   max_archive_depth: 5                        # archives inside archives, this deep
   max_extract_bytes: 200GB                    # an archive that unpacks to more than this goes to quarantine/archive-failed
   smartname_max_length: 80
+  dedupe_backup_words: [backup, backups, temp, tmp, copy, copies, old, archive, archives, download, downloads, drive_backup, phototemp]
+  dedupe_generic_folders: []                  # extra folder names that say nothing (built-in: DCIM, Documents, New folder ...)
   pdf_text_words: 7                           # Check PDFs: a PDF with a page of more words than this is a document
   # categories:                               # leave out for the built-in list (images and raw -> imagepipe)
   #   documents: {pipeline: none, extensions: [pdf, docx, txt]}

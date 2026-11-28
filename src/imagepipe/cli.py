@@ -203,6 +203,26 @@ def cmd_triage_apply(cfg, args) -> int:
     return 130
 
 
+def cmd_triage_dedupe(cfg, args) -> int:
+    from imagepipe.triage.dedupe import run_dedupe
+
+    _triage_cfg(cfg)
+    try:
+        result = run_dedupe(cfg, dry_run=args.dry_run)
+    except Exception as exc:
+        log.exception("Remove duplicates failed")
+        print(f"ERROR: {exc}", file=sys.stderr)
+        notify.send(cfg.notify, "error", "Triage remove duplicates failed", str(exc), "failure")
+        return 2
+    body = ", ".join(f"{v:,} {k}" for k, v in sorted(result["stats"].items())) or "no duplicates"
+    print(("Dry run - nothing moved: " if args.dry_run else "Remove duplicates: ") + body)
+    if result["status"] == "finished":
+        notify.send(cfg.notify, "finished", "Triage remove duplicates finished", body, "success")
+        return 0
+    notify.send(cfg.notify, "error", "Triage remove duplicates interrupted", body, "warning")
+    return 130
+
+
 def cmd_triage_check_pdfs(cfg, args) -> int:
     from imagepipe.triage.pdfcheck import run_pdf_check
 
@@ -423,6 +443,10 @@ def build_parser() -> argparse.ArgumentParser:
     ta = tsub.add_parser("apply", help="carry out the plan: move, extract archives, write tags")
     ta.add_argument("--limit", type=int, help="stop after this many files/archives (for a trial run)")
     ta.set_defaults(func=cmd_triage_apply)
+    tdd = tsub.add_parser("dedupe", help="keep one copy of each set of identical files; move the others to "
+                          "sorted/excluded/triage-duplicate")
+    tdd.add_argument("--dry-run", action="store_true", help="only write the report of what would happen")
+    tdd.set_defaults(func=cmd_triage_dedupe)
     tc_ = tsub.add_parser("check-pdfs", help="sort the PDFs in sorted/documents into documents, photo scans "
                           "(split by ScanSplitter) and uncertain")
     tc_.add_argument("--limit", type=int, help="check at most this many new PDFs (for a trial run); PDFs waiting "
