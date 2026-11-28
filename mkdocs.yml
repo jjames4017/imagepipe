@@ -30,6 +30,7 @@ nav:
       - Catalogue: stages/catalogue.md
       - Triage: stages/triage.md
       - Layered TIFF / PSD: stages/layered.md
+      - PhotoPrism export: stages/ppexport.md
       - Phase 2 (stages 1, 2, 4): stages/phase2.md
   - Web UI: web-ui.md
   - Notifications: notifications.md

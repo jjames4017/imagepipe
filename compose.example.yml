@@ -23,3 +23,4 @@ services:
       - /srv/imagepipe/data:/data             # CHANGE ME: manifest, logs, reports
       - /srv/photos:/sources/photos:ro        # CHANGE ME: a source folder, always read-only
       # - /wolf-pool/vault:/wolf-pool/vault   # triage: sources and filestack in ONE mount, same path as the host
+      # - /mnt/appdata/imagelibrary:/mnt/appdata/imagelibrary:ro   # PhotoPrism export: PhotoPrism's originals, read-only

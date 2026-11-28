@@ -1,6 +1,8 @@
 # Phase 2: stages 1, 2 and 4
 
-Phase 2 takes the photos triage sorted into the categories whose pipeline is
+Phase 2 takes the photos from the [PhotoPrism export](ppexport.md)
+(`<filestack>/imagepipe/intake/photoprism`, always first, in `pp-` batches) and
+then the photos triage sorted into the categories whose pipeline is
 `imagepipe` (by default `sorted/images` and `sorted/raw`) through stage 1 (month
 batches), stage 2 (ID check, fingerprint, ID written into the file) and stage 4
 (exact duplicates), reads Google Takeout dates and GPS, and sends disagreements
@@ -26,7 +28,8 @@ live progress; **Pause** and **Stop** work as for any job. A stopped run keeps
 everything done and the next run carries on with the same batch.
 
 Without `--batch`, a run takes the batch in progress, else the oldest waiting
-one (undated batches last). One batch per run.
+one (`pp-` batches from the PhotoPrism export first, undated batches last).
+One batch per run.
 
 ## What a run does
 

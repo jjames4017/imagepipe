@@ -342,16 +342,23 @@ def safe_write(tools: Tools, path: Path, values: dict, ident: str | None = None,
             tmp.unlink()
 
 
+def struct_value(v) -> str:
+    """exiftool's serialized structure form ({K=V,...} and [a,b]); special characters escaped with |."""
+    if isinstance(v, dict):
+        return "{" + ",".join(f"{k}={struct_value(x)}" for k, x in v.items()) + "}"
+    if isinstance(v, (list, tuple)):
+        return "[" + ",".join(struct_value(x) for x in v) + "]"
+    s = _one_line(v)
+    for c in "|,[]{}=":
+        s = s.replace(c, "|" + c)
+    return s
+
+
 def _write_regions(et: ExifTool, target: Path, regions: dict) -> tuple[bool, str]:
-    data = target.with_name(f".ipr-{uuid.uuid4().hex[:8]}.json")
-    try:
-        data.write_text(json.dumps([{"SourceFile": str(target), "RegionInfo": regions}]), encoding="utf-8")
-        out = _run(et, ["-overwrite_original", "-P", f"-json={data}", str(target)])
-        ok = "1 image files updated" in out or "1 files updated" in out
-        return ok, out[:200]
-    finally:
-        if data.exists():
-            data.unlink()
+    # A -json= file isn't read reliably through the stay-open exiftool, so the structure is passed inline.
+    out = _run(et, ["-overwrite_original", "-P", f"-XMP-mwg-rs:RegionInfo={struct_value(regions)}", str(target)])
+    ok = "1 image files updated" in out or "1 files updated" in out
+    return ok, out[:200]
 
 
 def merge_regions(keeper: dict | None, other: dict | None) -> dict | None:

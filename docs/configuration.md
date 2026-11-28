@@ -52,6 +52,21 @@ silently ignored.
 Notifications are off unless both `apprise_url` and `apprise_key` are set. See
 [Notifications](notifications.md).
 
+## `photoprism_export`
+
+Optional. Uses the PhotoPrism address and login in `tools.photoprism` and the
+triage section's filestack. See [PhotoPrism export](stages/ppexport.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `originals` | `/mnt/appdata/imagelibrary` | PhotoPrism's originals folder as the container sees it (mount it read-only) |
+| `exclude` | `[imagepipe, library, .ppignore, "*.yml"]` | Top-level folders or file-name patterns not copied |
+| `faces` | `all` | `all`: every named face; `manual`: only faces you named |
+| `favourite_tag` | `Favourite` | Tag for favourites (they also get rating 5) |
+| `review_tag` | `Review` | Tag for photos archived in PhotoPrism |
+| `private_tag` | `Private` | Tag for private photos |
+| `album_prefix` | `Albums` | Albums are written as `<this>\|<album>` and `<this>/<album>` |
+
 ## `phase2`
 
 Optional. Phase 2 also needs the `triage` section (it uses the filestack and the
