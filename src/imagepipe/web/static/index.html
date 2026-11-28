@@ -72,6 +72,7 @@
     <button data-tab="status">Status</button>
     <button data-tab="plan">Plan review</button>
     <button data-tab="actions">Actions</button>
+    <button data-tab="files">Files</button>
     <button data-tab="conflicts">Conflicts <span id="conf-count" class="pill" hidden></span></button>
     <button data-tab="reports">Reports</button>
     <button data-tab="settings">Settings</button>
@@ -204,6 +205,30 @@
     </div>
   </section>
 
+  <!-- FILES -->
+  <section class="tab" id="tab-files">
+    <div class="card">
+      <h2>Files</h2>
+      <p class="sub">Search the files triage has placed and move them to another triage destination. Files keep their
+        original sub-folders, companions (sidecars, Live Photo clips) go with them, the triage database and the Actions
+        tab are updated, and a PDF you move is left alone by Check PDFs. Nothing is overwritten or deleted.</p>
+      <div class="row">
+        <input type="text" id="fl-q" placeholder="name or folder words" style="min-width:280px">
+        <select id="fl-in"><option value="">everywhere</option></select>
+        <button class="b primary" id="fl-search">Search</button>
+        <span class="muted" id="fl-count"></span>
+      </div>
+      <div class="row">
+        <label class="inline"><input type="checkbox" id="fl-all"> select all on this page</label>
+        <span class="muted">Move selected to</span><select id="fl-dest"></select>
+        <button class="b danger" id="fl-move">Move</button><span class="msg" id="fl-msg"></span>
+      </div>
+      <table><thead><tr><th></th><th>Name</th><th>In</th><th>Original place</th><th class="num">Size</th></tr></thead>
+        <tbody id="fl-rows"></tbody></table>
+      <div class="pager"><button class="b" id="fl-prev">Previous</button><button class="b" id="fl-next">Next</button></div>
+    </div>
+  </section>
+
   <!-- CONFLICTS -->
   <section class="tab" id="tab-conflicts">
     <div class="card">
@@ -274,6 +299,7 @@ $$("#nav button").forEach(b => b.onclick = () => {
   $$("#nav button").forEach(x => x.classList.toggle("on", x === b));
   $$("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + b.dataset.tab));
   ({status: loadStatus, plan: () => loadPlan(0), actions: () => loadActions(0), conflicts: () => loadConflicts(0),
+    files: loadFileDests,
     reports: loadReports, settings: loadSettings})[b.dataset.tab]?.();
 });
 
@@ -415,6 +441,48 @@ async function loadActions(off) {
 $("#a-go").onclick = () => loadActions(0); $("#a-kind").onchange = () => loadActions(0);
 $("#a-q").onkeydown = e => { if (e.key === "Enter") loadActions(0); };
 $("#a-prev").onclick = () => loadActions(aOff - PAGE); $("#a-next").onclick = () => loadActions(aOff + PAGE);
+
+// ---------- files (search and move)
+let flOff = 0; const FL_PAGE = 100;
+async function loadFileDests() {
+  if ($("#fl-dest").options.length) return;
+  try {
+    const r = await api("/api/files?destinations=1");
+    $("#fl-in").innerHTML = `<option value="">everywhere</option>` + r.destinations.map(d => `<option>${esc(d)}</option>`).join("");
+    $("#fl-dest").innerHTML = r.destinations.map(d => `<option>${esc(d)}</option>`).join("");
+  } catch (e) { showMsg($("#fl-msg"), e.message, false); }
+}
+async function searchFiles(off) {
+  flOff = Math.max(0, off);
+  const q = new URLSearchParams({q: $("#fl-q").value, dest: $("#fl-in").value, offset: flOff, limit: FL_PAGE});
+  $("#fl-count").textContent = "searching...";
+  try {
+    const r = await api("/api/files?" + q);
+    $("#fl-count").textContent = `${r.total.toLocaleString()} file(s)`;
+    $("#fl-rows").innerHTML = r.rows.map(f => `<tr><td><input type="checkbox" data-fid="${f.id}"></td>
+      <td class="path" title="${esc(f.path)}">${esc(f.name)}</td><td>${esc(f.where)}</td>
+      <td class="path">${esc(f.origin || "")}</td><td class="num">${fmtBytes(f.size)}</td></tr>`).join("")
+      || `<tr><td colspan="5" class="muted">Nothing found.</td></tr>`;
+    $("#fl-all").checked = false;
+    $("#fl-prev").disabled = flOff === 0; $("#fl-next").disabled = flOff + FL_PAGE >= r.total;
+  } catch (e) { $("#fl-count").textContent = ""; showMsg($("#fl-msg"), e.message, false); }
+}
+$("#fl-search").onclick = () => searchFiles(0);
+$("#fl-q").onkeydown = e => { if (e.key === "Enter") searchFiles(0); };
+$("#fl-prev").onclick = () => searchFiles(flOff - FL_PAGE); $("#fl-next").onclick = () => searchFiles(flOff + FL_PAGE);
+$("#fl-all").onchange = () => $$("[data-fid]").forEach(c => { c.checked = $("#fl-all").checked; });
+$("#fl-move").onclick = async () => {
+  const ids = $$("[data-fid]").filter(c => c.checked).map(c => Number(c.dataset.fid));
+  const dest = $("#fl-dest").value;
+  if (!ids.length) return showMsg($("#fl-msg"), "Tick the files to move first", false);
+  if (!confirm(`Move ${ids.length} file(s) to ${dest}?\n\nThey keep their original sub-folders; companions go with them.`)) return;
+  try {
+    const r = await api("/api/files/move", {ids, dest});
+    showMsg($("#fl-msg"), `Moved ${r.moved}` + (r.skipped.length ? `, skipped ${r.skipped.length} (${r.skipped.map(s => s.why).slice(0, 3).join("; ")})` : "") +
+      (r.failed.length ? `, failed ${r.failed.length}: ${r.failed.map(f => f.why).slice(0, 3).join("; ")}` : ""), !r.failed.length);
+  } catch (e) { showMsg($("#fl-msg"), e.message, false); }
+  searchFiles(flOff);
+};
 
 // ---------- PDF projects (reprocess)
 $("#pdf-projects-load").onclick = async () => {

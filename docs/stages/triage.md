@@ -461,7 +461,10 @@ you **and nothing from a project is exported until every page in it is
 approved**; the next run then exports the whole project.
 Pages with a CHECK flag always wait for you in ScanSplitter's Projects page: fix the boxes and approve them there (or delete a
 page to skip it). Every later run exports the pages you approved. When all
-pages of a PDF are done the PDF moves to `sorted/excluded/pdf-source/`.
+pages of a PDF are done the PDF moves to `sorted/excluded/pdf-source/` - unless
+no page gave a photo (you removed every box and approved), then it goes to
+`sorted/quarantine/pdf-uncertain/`. ScanSplitter has no way to delete a page,
+so removing all its boxes and approving it is how you say "no photos here".
 ScanSplitter's own Deliver is never used. A run's project is deleted again at
 the end if nothing in it is waiting for review.
 
@@ -535,6 +538,27 @@ A page is reprocessed when ScanSplitter shows it approved later than ImagePipe
 exported it - every page approved again, whether or not its boxes changed. Its
 earlier photos move to `sorted/excluded/pdf-reprocessed/` (nothing is
 overwritten or deleted) and the page is exported again to the same folder in
-`sorted/images`. A page whose earlier photos have already moved on (into
-ImagePipe) is skipped and listed. Every move is in `actions.csv`; each run writes
+`sorted/images`. The new photos are fetched from ScanSplitter first; the
+earlier ones only move once that has worked. A page approved with no boxes has
+its earlier photos moved out and nothing new written ("no photos on this page
+now"). A page ScanSplitter can't export is listed as an error and left as it
+was; the run carries on. A page whose earlier photos have already moved on (into
+ImagePipe) is skipped and listed. A split PDF whose photos are now all removed
+moves from `pdf-source` to `sorted/quarantine/pdf-uncertain/`. Every move is in `actions.csv`; each run writes
 `pdf-reprocess-<time>/pages.csv`.
+
+## Moving files by hand (Files tab)
+
+The **Files** tab searches everything triage has placed (any Triage Category,
+`quarantine/...` or `excluded/...`) by words in the name or the original folder,
+optionally in one destination. Tick files and **Move** them to any other triage
+destination, for example from `quarantine/pdf-uncertain` to `documents`, or from
+`images` to `excluded/triage-duplicate`.
+
+A move keeps the original sub-folders (`<destination>/<source folder>/<original
+folders>/<name>`), takes the file's companions (sidecars, Live Photo clips) with
+it, updates the triage database, and logs a `manual-move` action (Actions tab,
+`actions.csv`). A PDF you move is recorded as decided by you, so Check PDFs
+leaves it alone; if it was waiting in ScanSplitter it stops waiting. Moves are
+safe moves: checked, never overwriting, nothing deleted. Moving is refused while
+a job is running.
