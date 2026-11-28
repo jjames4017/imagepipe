@@ -93,6 +93,17 @@ triage:
 #   a_eye:        {url: http://<host>:8000, username: "", password: ""}
 #   digikam:      {url: https://<host>:3011, username: "", password: ""}
 
+# PhotoPrism export: copies PhotoPrism's originals into <filestack>/imagepipe/intake/photoprism
+# with your albums, named faces, favourites, captions and edits written into the copies.
+# photoprism_export:
+#   originals: /mnt/appdata/imagelibrary   # PhotoPrism's originals, mounted read-only
+#   exclude: [imagepipe, library, .ppignore, "*.yml"]
+#   faces: all                  # all named faces, or manual (only faces you named)
+#   favourite_tag: Favourite
+#   review_tag: Review          # photos archived in PhotoPrism
+#   private_tag: Private
+#   album_prefix: Albums
+
 # Phase 2 (stages 1, 2 and 4). Off until the PhotoPrism export exists.
 # phase2:
 #   enabled: false

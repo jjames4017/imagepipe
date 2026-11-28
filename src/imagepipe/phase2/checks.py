@@ -65,7 +65,7 @@ def ready_check(cfg, batch: str | None = None) -> dict:
     m = Manifest(cfg.manifest, cfg.tz)
     tools = meta.Tools()
     try:
-        where = "source LIKE 'sorted/%' AND status IN ('processed', 'pending-conflict', 'held', 'error')"
+        where = "(source LIKE 'sorted/%' OR source LIKE 'intake/%') AND status IN ('processed', 'pending-conflict', 'held', 'error')"
         params: tuple = ()
         if batch:
             where += " AND batch=?"

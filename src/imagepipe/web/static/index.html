@@ -134,6 +134,14 @@
           <button class="b" data-job="report">Rebuild reports</button>
           <button class="b" data-job="export-csv">Export CSV</button>
         </div>
+        <h2 style="margin-top:16px">PhotoPrism export</h2>
+        <p class="sub">Copies PhotoPrism's originals (read-only) into imagepipe/intake/photoprism with your albums, named
+          faces, favourites, captions, titles, keywords and date/place edits written into the copies; archived photos get
+          the tag Review. Other files go to triage/intake/photoprism. The originals are never changed. Run the dry run
+          first and check its report on the Reports tab. Phase 2 takes these photos first.</p>
+        <div class="row"><button class="b" data-job="ppexport-dry">Export (dry run)</button>
+          <button class="b danger" data-job="ppexport">Export - copies files</button>
+          <span class="muted">limit</span><input type="number" id="pp-limit" min="1" placeholder="all photos" style="width:120px"></div>
         <h2 style="margin-top:16px">Phase 2</h2>
         <p class="sub" id="p2-state"></p>
         <div class="row"><span class="muted">Batch</span><input type="text" id="p2-batch" placeholder="next waiting" style="width:150px;min-width:150px"></div>
@@ -331,6 +339,10 @@ $$("[data-job]").forEach(b => b.onclick = async () => {
   if (kind === "catalogue") options.retry_errors = $("#c-retry").checked;
   if (kind.startsWith("phase2")) options.batch = $("#p2-batch").value;
   if (kind === "triage-check-pdfs") options.limit = $("#pdf-limit").value;
+  if (kind.startsWith("ppexport")) options.limit = $("#pp-limit").value;
+  if (kind === "ppexport" && !confirm("Export from PhotoPrism " + (options.limit ? `(the first ${options.limit} photos)` : "(every photo)") +
+      "?\n\nIt COPIES PhotoPrism's originals into imagepipe/intake/photoprism (other files into triage/intake/photoprism) " +
+      "and writes your PhotoPrism work into the copies. The originals are not changed. A stopped run carries on next time.")) return;
   if (kind.startsWith("triage-reprocess")) options.project = $("#pdf-project").value;
   if (kind === "triage-reprocess" && !confirm("Reprocess this project?\n\nPages approved again since they were exported " +
       "are exported again; their earlier photos MOVE to sorted/excluded/pdf-reprocessed.")) return;

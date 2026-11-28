@@ -49,6 +49,8 @@ JOBS = {
     "triage-dedupe": "Triage: remove duplicates",
     "triage-reprocess-dry": "Triage: reprocess PDF project (dry run)",
     "triage-reprocess": "Triage: reprocess PDF project",
+    "ppexport-dry": "PhotoPrism export (dry run)",
+    "ppexport": "PhotoPrism export (copies files)",
     "phase2-find": "Phase 2: find photos and make batches",
     "phase2-run": "Phase 2: run one batch (stages 1, 2, 4)",
     "phase2-ready-check": "Phase 2: ready check",
@@ -98,6 +100,12 @@ def build_argv(job: str, opts: dict) -> list[str]:
         if limit and not (limit.isdigit() and int(limit) > 0):
             raise ValueError("Limit must be a whole number above 0")
         return ["triage", "check-pdfs"] + (["--limit", limit] if limit else [])
+    if job in ("ppexport-dry", "ppexport"):
+        limit = str(opts.get("limit") or "").strip()
+        if limit and not (limit.isdigit() and int(limit) > 0):
+            raise ValueError("Limit must be a whole number above 0")
+        return ["photoprism-export"] + (["--dry-run"] if job == "ppexport-dry" else []) + \
+            (["--limit", limit] if limit else [])
     batch = str(opts.get("batch") or "").strip()
     if batch and not all(c.isalnum() or c == "-" for c in batch):
         raise ValueError("A batch name has only letters, digits and hyphens, e.g. 2015-06 or undated-001")

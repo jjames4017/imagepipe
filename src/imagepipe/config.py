@@ -70,6 +70,7 @@ class Config:
     triage: "TriageConfig | None" = None
     tools: "ToolsConfig | None" = None
     phase2: "Phase2Config | None" = None
+    photoprism_export: "PPExportConfig | None" = None
 
     @property
     def tz(self) -> ZoneInfo:
@@ -145,12 +146,13 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         raise ConfigError("notify.events must be a list of event names, e.g. [finished, error]")
 
     known_top = {"timezone", "manifest", "log_dir", "reports_dir", "sources", "catalogue", "notify", "triage",
-                 "tools", "phase2"}
+                 "tools", "phase2", "photoprism_export"}
     unknown = {str(k) for k in data} - known_top
     if unknown:
         raise ConfigError(f"Unknown top-level key(s): {', '.join(sorted(unknown))}")
 
     from imagepipe.phase2.config import parse_phase2
+    from imagepipe.ppexport import parse_ppexport
     from imagepipe.tools import parse_tools
     from imagepipe.triage.config import parse_triage
 
@@ -166,4 +168,5 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         triage=parse_triage(data.get("triage")),
         tools=parse_tools(data.get("tools")),
         phase2=parse_phase2(data.get("phase2")),
+        photoprism_export=parse_ppexport(data.get("photoprism_export")),
     )

@@ -156,6 +156,23 @@ PHASE2 = [
      "help": "Flagged only; whether a bigger copy exists is checked at stage 6"},
 ]
 
+PPEXPORT = [
+    {"key": "originals", "type": "path", "label": "PhotoPrism's originals folder (as ImagePipe sees it)",
+     "default": "/mnt/appdata/imagelibrary",
+     "help": "Mount it read-only in the ImagePipe container. Uses the PhotoPrism address and login in External tools"},
+    {"key": "exclude", "type": "list", "label": "Leave out (folders or file names)",
+     "default": ["imagepipe", "library", ".ppignore", "*.yml"],
+     "help": "Top-level folders or file-name patterns in the originals that aren't copied (PhotoPrism's .yml sidecars)"},
+    {"key": "faces", "type": "choice", "label": "Faces to write", "choices": ["all", "manual"], "default": "all",
+     "help": "all: every face PhotoPrism has a name for; manual: only faces you named yourself"},
+    {"key": "favourite_tag", "type": "str", "label": "Favourite tag", "default": "Favourite",
+     "help": "Favourites also get rating 5"},
+    {"key": "review_tag", "type": "str", "label": "Tag for photos archived in PhotoPrism", "default": "Review"},
+    {"key": "private_tag", "type": "str", "label": "Tag for private photos", "default": "Private"},
+    {"key": "album_prefix", "type": "str", "label": "Albums go under this tag", "default": "Albums",
+     "help": "Each album is written as a keyword and as <this>|<album> (digiKam/Lightroom tag tree)"},
+]
+
 SCHEMA = [
     {"section": None, "label": "General", "fields": TOP},
     {"section": "catalogue", "label": "Catalogue", "fields": CATALOGUE},
@@ -164,6 +181,9 @@ SCHEMA = [
      "help": "Where each outside tool is. Saved in imagepipe.yml (passwords and keys too). Test checks a tool "
              "from this container, using what is typed in the form, saved or not."},
     {"section": "triage", "label": "Triage", "optional": True, "fields": TRIAGE},
+    {"section": "photoprism_export", "label": "PhotoPrism export", "optional": True, "fields": PPEXPORT,
+     "help": "Copies PhotoPrism's originals into <filestack>/imagepipe/intake/photoprism with your PhotoPrism work "
+             "written into the copies; anything else goes to <filestack>/triage/intake/photoprism."},
     {"section": "phase2", "label": "Phase 2", "optional": True, "fields": PHASE2,
      "help": "Stages 1, 2 and 4: month batches into <filestack>/imagepipe/processing/, IDs written into the files, "
              "exact duplicates out, conflicts to the Conflicts tab. Uses the triage section's filestack and categories."},

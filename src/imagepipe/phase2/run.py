@@ -3,8 +3,10 @@ the file), stage 4 (exact duplicates), Google Takeout dates/GPS and the per-batc
 
 One batch per run:
 
-1. Find   - every photo in the categories whose pipeline is imagepipe (sorted/images,
-            sorted/raw): date taken (EXIF, else Google Takeout), recorded in the manifest.
+1. Find   - every photo in <filestack>/imagepipe/intake/photoprism/ (the PhotoPrism export)
+            and in the categories whose pipeline is imagepipe (sorted/images, sorted/raw):
+            date taken (EXIF, else Google Takeout), recorded in the manifest. The PhotoPrism
+            photos get their own batches (pp-...), and those are all taken first.
 2. Batch  - one batch per calendar month by date taken, split above `batch_size`;
             undated photos in batches of `batch_size`.
 3. Stage 1 - the oldest waiting batch moves to <filestack>/imagepipe/processing/<batch>/,
@@ -41,7 +43,7 @@ from datetime import datetime
 from pathlib import Path
 
 from imagepipe import ids
-from imagepipe.detect import EXT_KIND, SIDECAR_EXT, extension
+from imagepipe.detect import EXT_KIND, IMAGE_EXT, RAW_EXT, SIDECAR_EXT, VIDEO_EXT, extension
 from imagepipe.fspath import to_db
 from imagepipe.manifest import Manifest
 from imagepipe.phase2 import conflicts as cf
@@ -55,6 +57,18 @@ FORMAT_RANK = {"tif": 4, "tiff": 4, "png": 4, "heic": 3, "heif": 3, "avif": 3, "
 EXCLUDED_COLUMNS = ("pipeline_id", "original_path", "excluded_path", "reason", "keeper_pipeline_id", "similarity",
                     "width", "height", "size", "timestamp")
 TRAVELLING_EXT = {"json"} | SIDECAR_EXT  # files that travel with their photo
+PP_SOURCE = "intake/photoprism"        # the PhotoPrism export; its batches go first
+PP_PREFIX = "pp-"
+PIPE_SOURCES = "(source LIKE 'sorted/%' OR source LIKE 'intake/%')"
+
+
+def live_clip(p: Path) -> bool:
+    """A Live Photo clip: a video next to a photo of the same name (it travels with the photo)."""
+    if extension(p.name) not in VIDEO_EXT:
+        return False
+    stem = p.stem.lower()
+    return any(extension(o.name) in IMAGE_EXT | RAW_EXT and o.stem.lower() == stem
+               for o in p.parent.iterdir() if o != p)
 
 
 class Phase2Error(Exception):
@@ -114,23 +128,30 @@ class Phase2:
         return r[0] if r else None
 
     # -- 1. find ------------------------------------------------------------------------
+    def roots(self) -> list[tuple[str, str, Path]]:
+        """(category, source, folder) to look in: the PhotoPrism export first."""
+        out = [("photoprism", PP_SOURCE, self.tc.imagepipe_dir / "intake" / "photoprism")]
+        out += [(cat, f"sorted/{cat}", self.tc.bucket_dir(cat)) for cat in self.tc.categories_for("imagepipe")]
+        return out
+
     def find(self) -> None:
-        cats = self.tc.categories_for("imagepipe")
         todo = []
-        for cat in cats:
-            root = self.tc.bucket_dir(cat)
+        where = []
+        for cat, source, root in self.roots():
             if not root.is_dir():
                 continue
-            source = f"sorted/{cat}"
+            where.append(source)
             known = {r["rel_path"]: r for r in self.m.db.execute(
                 "SELECT id, rel_path, size, mtime, status FROM files WHERE source=?", (source,))}
             seen = set()
             for dirpath, dirs, files in os.walk(root):
                 dirs.sort()
                 for name in sorted(files):
-                    if extension(name) in TRAVELLING_EXT or name.startswith(".ipw-"):
+                    if extension(name) in TRAVELLING_EXT or name.startswith((".ipw-", ".ipc-")):
                         continue
                     p = Path(dirpath) / name
+                    if source == PP_SOURCE and live_clip(p):
+                        continue
                     rel = to_db(str(p.relative_to(root)))
                     seen.add(rel)
                     st = p.stat()
@@ -145,7 +166,7 @@ class Phase2:
                 if r["status"] == "waiting" and rel not in seen:
                     self.update(r["id"], status="missing")
         self.m.db.commit()
-        say(f"Photos to read in {', '.join('sorted/' + c for c in cats)}: {len(todo):,}")
+        say(f"Photos to read in {', '.join(where) or 'nothing (no folders yet)'}: {len(todo):,}")
         if not todo:
             return
         with Progress("Find photos", total=len(todo), total_bytes=sum(t[5].st_size for t in todo)) as prog:
@@ -183,20 +204,21 @@ class Phase2:
 
     # -- 2. batches ---------------------------------------------------------------------
     def assign_batches(self) -> None:
-        rows = self.m.db.execute("SELECT id, date_taken, undated FROM files WHERE status='waiting' AND batch IS NULL "
-                                 "AND source LIKE 'sorted/%' ORDER BY date_taken, id").fetchall()
+        rows = self.m.db.execute("SELECT id, date_taken, undated, source FROM files WHERE status='waiting' "
+                                 f"AND batch IS NULL AND {PIPE_SOURCES} ORDER BY date_taken, id").fetchall()
         if not rows:
             return
-        groups: dict[str | None, list] = defaultdict(list)
+        groups: dict[tuple[str, str | None], list] = defaultdict(list)
         for r in rows:
             month = r["date_taken"][:7].replace(":", "-") if r["date_taken"] else None
-            groups[month].append(r["id"])
+            groups[(PP_PREFIX if r["source"] == PP_SOURCE else "", month)].append(r["id"])
         size = self.p2.batch_size
         made = 0
-        for month, idlist in sorted(groups.items(), key=lambda kv: (kv[0] is None, kv[0] or "")):
+        for (prefix, month), idlist in sorted(groups.items(),
+                                              key=lambda kv: (kv[0][0] != PP_PREFIX, kv[0][1] is None, kv[0][1] or "")):
             chunks = [idlist[i:i + size] for i in range(0, len(idlist), size)]
             for chunk in chunks:
-                name = self._next_batch_name(month, len(chunks))
+                name = self._next_batch_name(month, len(chunks), prefix)
                 self.m.db.execute("INSERT INTO batches (name, month, status, files, created_at, updated_at) "
                                   "VALUES (?, ?, 'planned', ?, ?, ?)", (name, month, len(chunk), self.m.now(),
                                                                        self.m.now()))
@@ -205,14 +227,15 @@ class Phase2:
         self.m.db.commit()
         say(f"New batches: {made:,} ({len(rows):,} photos)")
 
-    def _next_batch_name(self, month: str | None, parts: int) -> str:
+    def _next_batch_name(self, month: str | None, parts: int, prefix: str = "") -> str:
+        mine = "name LIKE 'pp-%'" if prefix == PP_PREFIX else "name NOT LIKE 'pp-%'"
         if month is None:
-            n = self.m.db.execute("SELECT COUNT(*) FROM batches WHERE month IS NULL").fetchone()[0]
-            return f"undated-{n + 1:03d}"
-        existing = [r[0] for r in self.m.db.execute("SELECT name FROM batches WHERE month=?", (month,))]
+            n = self.m.db.execute(f"SELECT COUNT(*) FROM batches WHERE month IS NULL AND {mine}").fetchone()[0]
+            return f"{prefix}undated-{n + 1:03d}"
+        existing = [r[0] for r in self.m.db.execute(f"SELECT name FROM batches WHERE month=? AND {mine}", (month,))]
         if not existing and parts == 1:
-            return month
-        return f"{month}-{len(existing) + 1}"
+            return f"{prefix}{month}"
+        return f"{prefix}{month}-{len(existing) + 1}"
 
     def pick(self, name: str | None) -> str | None:
         if name:
@@ -226,12 +249,16 @@ class Phase2:
         if r:
             return r[0]
         r = self.m.db.execute("SELECT name FROM batches WHERE status='planned' "
-                              "ORDER BY month IS NULL, name LIMIT 1").fetchone()
+                              "ORDER BY name NOT LIKE 'pp-%', month IS NULL, name LIMIT 1").fetchone()
         return r[0] if r else None
 
     # -- 3. stage 1: into processing/<batch> ----------------------------------------------
-    def travelling(self, photo: Path, takeout_json: str | None) -> list[Path]:
+    def travelling(self, photo: Path, takeout_json: str | None, clips: bool = False) -> list[Path]:
         out = []
+        if clips:  # Live Photo clips from the PhotoPrism export
+            stem = photo.stem.lower()
+            out += sorted(o for o in photo.parent.iterdir()
+                          if o != photo and o.stem.lower() == stem and extension(o.name) in VIDEO_EXT)
         if takeout_json and Path(takeout_json).is_file():
             out.append(Path(takeout_json))
         for cand in (photo.with_name(photo.name + ".xmp"), photo.with_suffix(".xmp"), photo.with_suffix(".XMP"),
@@ -258,7 +285,7 @@ class Phase2:
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 try:
                     tj_new = None
-                    for side in self.travelling(src, r["takeout_json"]):
+                    for side in self.travelling(src, r["takeout_json"], clips=r["source"] == PP_SOURCE):
                         sdest = free_name(dest_dir / side.name)
                         transfer(str(side), sdest, None, self.tc.verify)
                         if r["takeout_json"] and Path(r["takeout_json"]) == side:
@@ -608,6 +635,10 @@ class Phase2:
             os.rename(path, new)
             if raw and meta.sidecar_for(path).is_file():
                 os.rename(meta.sidecar_for(path), meta.sidecar_for(new))
+            if r["source"] == PP_SOURCE:  # a Live Photo clip keeps its photo's name
+                for clip in self.travelling(path, None, clips=True):
+                    if extension(clip.name) in VIDEO_EXT:
+                        os.rename(clip, clip.with_name(Path(new.name).stem + clip.suffix))
             path = new
         pending = self.m.db.execute("SELECT COUNT(*) FROM conflicts WHERE file_id=? AND status='pending'",
                                     (r["id"],)).fetchone()[0]
@@ -721,7 +752,7 @@ def status_text(cfg) -> str:
         lines = [f"Phase 2 {'ON' if cfg.phase2 and cfg.phase2.enabled else 'OFF (phase2.enabled: false)'}"]
         rows = m.db.execute("SELECT status, COUNT(*), COALESCE(SUM(files), 0) FROM batches GROUP BY status").fetchall()
         lines.append("Batches: " + (", ".join(f"{n:,} {s} ({f:,} photos)" for s, n, f in rows) or "none yet"))
-        rows = m.db.execute("SELECT status, COUNT(*) FROM files WHERE source LIKE 'sorted/%' GROUP BY status").fetchall()
+        rows = m.db.execute(f"SELECT status, COUNT(*) FROM files WHERE {PIPE_SOURCES} GROUP BY status").fetchall()
         lines.append("Photos: " + (", ".join(f"{n:,} {s}" for s, n in rows) or "none yet"))
         rows = m.db.execute("SELECT field, COUNT(*) FROM conflicts WHERE status='pending' GROUP BY field").fetchall()
         lines.append("Conflicts waiting: " + (", ".join(f"{n:,} {f}" for f, n in rows) or "none"))

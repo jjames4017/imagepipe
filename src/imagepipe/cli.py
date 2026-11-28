@@ -307,6 +307,29 @@ def cmd_triage_relocate(cfg, args) -> int:
     return 1 if res.get("error") else 0
 
 
+# ---------------------------------------------------------------- PhotoPrism export
+def cmd_photoprism_export(cfg, args) -> int:
+    from imagepipe.ppexport import PhotoPrismError, run_export
+
+    try:
+        result = run_export(cfg, dry_run=args.dry_run, limit=args.limit)
+    except (PhotoPrismError, ConfigError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:
+        log.exception("PhotoPrism export failed")
+        notify.send(cfg.notify, "error", "PhotoPrism export failed", repr(exc), "failure")
+        return 2
+    name = "PhotoPrism export (dry run)" if args.dry_run else "PhotoPrism export"
+    body = ", ".join(f"{v:,} {k}" for k, v in sorted(result["stats"].items())) or "nothing to do"
+    print(("Dry run - nothing copied: " if args.dry_run else "PhotoPrism export: ") + body)
+    if result["status"] == "finished":
+        notify.send(cfg.notify, "finished", f"{name} finished", body, "success")
+        return 0
+    notify.send(cfg.notify, "error", f"{name} interrupted", body, "warning")
+    return 130
+
+
 # ---------------------------------------------------------------- phase 2
 def cmd_phase2_run(cfg, args) -> int:
     from imagepipe.phase2.run import Phase2Error, run_phase2
@@ -494,6 +517,12 @@ def build_parser() -> argparse.ArgumentParser:
     te = tsub.add_parser("export-csv", help="write every file in the triage database to one CSV")
     te.add_argument("--output")
     te.set_defaults(func=cmd_triage_export)
+
+    ppx = sub.add_parser("photoprism-export", help="copy PhotoPrism's originals into imagepipe/intake/photoprism with "
+                         "your albums, faces, favourites, captions and edits written into the copies")
+    ppx.add_argument("--dry-run", action="store_true", help="only write the report of what would be copied/written")
+    ppx.add_argument("--limit", type=int, help="only the first N photos (for a trial run; other files aren't looked at)")
+    ppx.set_defaults(func=cmd_photoprism_export)
 
     p2 = sub.add_parser("phase2", help="stages 1, 2 and 4: month batches, IDs, exact duplicates, conflicts")
     p2sub = p2.add_subparsers(dest="phase2_command", required=True)
