@@ -19,7 +19,8 @@ changing them - and writes into the copy of the image:
 Photos, RAW files and the files that belong to them (Live Photo clips, .xmp/.json/.aae
 sidecars) go to <filestack>/imagepipe/intake/photoprism/, keeping their folders; phase 2 takes
 that folder first. Anything else in the originals goes to <filestack>/triage/intake/photoprism/
-for triage. PhotoPrism's own .yml sidecars are not copied.
+for triage. Files matching `exclude` (by default PhotoPrism's own .yml sidecars and the .xmp
+sidecars an earlier AI tagging run left) are not copied at all - photo files or other files.
 
 A copy is written next to its destination first, checked against PhotoPrism's SHA-1 of the
 original, written into, checked again (it must still open), then renamed into place. A run
@@ -77,7 +78,7 @@ CREATE TABLE IF NOT EXISTS pp_export (
 @dataclass
 class PPExportConfig:
     originals: str = "/mnt/appdata/imagelibrary"      # PhotoPrism's originals, as ImagePipe sees them
-    exclude: list = field(default_factory=lambda: ["imagepipe", "library", ".ppignore", "*.yml"])
+    exclude: list = field(default_factory=lambda: ["imagepipe", "library", ".ppignore", "*.yml", "*.xmp"])
     faces: str = "all"                                # all named faces, or only ones you named ("manual")
     favourite_tag: str = "Favourite"
     review_tag: str = "Review"                        # archived in PhotoPrism
@@ -379,7 +380,7 @@ class Exporter:
         """RAW: write into its .xmp sidecar (the original's sidecar copied first if it has one)."""
         side = meta.sidecar_for(dest)
         orig_side = meta.sidecar_for(src)
-        if not side.exists() and orig_side.is_file():
+        if not side.exists() and orig_side.is_file() and not self.excluded(str(orig_side.relative_to(self.originals))):
             shutil.copy2(orig_side, side)
         tmp = side.with_name(f".ipc-{uuid.uuid4().hex[:8]}-{side.name}")
         try:
@@ -443,6 +444,10 @@ class Exporter:
                         fplan = (plan_photo(p, self.pc, raw=True) if ext in RAW_EXT else plan) if is_image else None
                         faces = faces_for(f, self.pc) if is_image else []
                         summary = (plan["summary"] + ([f"{len(faces)} face(s)"] if faces else [])) if is_image else []
+                        if self.excluded(name):
+                            w.writerow([uid, name, "", "left out (Leave out list)", ""])
+                            self.bump("left-out")
+                            continue
                         if self.done(name):
                             self.bump("already-done")
                             continue
@@ -502,7 +507,10 @@ class Exporter:
             dirs.sort()
             for n in sorted(files):
                 rel = n if rel_root == "." else f"{rel_root}/{n}"
-                if rel in copied or self.excluded(rel) or n.startswith(".ipc-"):
+                if rel in copied or n.startswith(".ipc-"):
+                    continue
+                if self.excluded(rel):
+                    self.bump("left-out")
                     continue
                 todo.append(rel)
         say(f"Other files in the originals (for triage): {len(todo):,}")

@@ -60,7 +60,7 @@ triage section's filestack. See [PhotoPrism export](stages/ppexport.md).
 | Key | Default | Meaning |
 |---|---|---|
 | `originals` | `/mnt/appdata/imagelibrary` | PhotoPrism's originals folder as the container sees it (mount it read-only) |
-| `exclude` | `[imagepipe, library, .ppignore, "*.yml"]` | Top-level folders or file-name patterns not copied |
+| `exclude` | `[imagepipe, library, .ppignore, "*.yml", "*.xmp"]` | Top-level folders or file-name patterns never copied - photo files and other files alike (the `.xmp` sidecars in the originals came from an earlier AI tagging run) |
 | `faces` | `all` | `all`: every named face; `manual`: only faces you named |
 | `favourite_tag` | `Favourite` | Tag for favourites (they also get rating 5) |
 | `review_tag` | `Review` | Tag for photos archived in PhotoPrism |

@@ -97,7 +97,7 @@ triage:
 # with your albums, named faces, favourites, captions and edits written into the copies.
 # photoprism_export:
 #   originals: /mnt/appdata/imagelibrary   # PhotoPrism's originals, mounted read-only
-#   exclude: [imagepipe, library, .ppignore, "*.yml"]
+#   exclude: [imagepipe, library, .ppignore, "*.yml", "*.xmp"]   # never copied, photo files included
 #   faces: all                  # all named faces, or manual (only faces you named)
 #   favourite_tag: Favourite
 #   review_tag: Review          # photos archived in PhotoPrism
