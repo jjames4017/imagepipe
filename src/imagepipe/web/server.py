@@ -603,6 +603,16 @@ def make_handler(app: App):
                     self._json(app.action_rows(q))
                 elif url.path == "/api/reports":
                     self._json(app.reports())
+                elif url.path == "/api/files":
+                    from imagepipe.triage import manual
+
+                    cfg = app.cfg()
+                    if cfg.triage is None:
+                        return self._json({"error": "No triage section in the config"}, HTTPStatus.BAD_REQUEST)
+                    if q.get("destinations"):
+                        return self._json({"destinations": manual.destinations(cfg.triage)})
+                    self._json(manual.search(cfg, q.get("q") or "", q.get("dest") or "",
+                                             min(int(q.get("limit") or 100), 500), int(q.get("offset") or 0)))
                 elif url.path == "/api/pdf-projects":
                     from imagepipe.triage.pdfcheck import projects
 
@@ -669,6 +679,14 @@ def make_handler(app: App):
                     from imagepipe.tools import check
 
                     self._json(check(str(body.get("tool") or ""), body.get("values") or {}))
+                elif url.path == "/api/files/move":
+                    from imagepipe.triage import manual
+
+                    job = app.runner.job
+                    if job is not None and job["status"] in ACTIVE:
+                        raise RuntimeError("A job is running. Wait for it to finish (or stop it) before moving files.")
+                    self._json(manual.move_files(app.cfg(), [int(i) for i in body.get("ids") or []],
+                                                 str(body.get("dest") or "")))
                 elif url.path == "/api/conflicts/resolve":
                     self._json(app.resolve_conflict(body))
                 elif url.path == "/api/reports/delete":

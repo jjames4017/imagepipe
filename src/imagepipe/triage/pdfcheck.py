@@ -254,9 +254,11 @@ class PdfChecker:
         except ValueError:
             return Path()
 
-    def export_page(self, pdf: Path, row, pid: str, s: dict, prog) -> list[str]:
-        """Export one approved page's photos to sorted/images. Returns the files written."""
-        photos = self.scansplitter().export_scan(pid, s["sid"], tick=prog.set_extra)
+    def export_page(self, pdf: Path, row, pid: str, s: dict, prog, photos=None) -> list[str]:
+        """Export one approved page's photos to sorted/images (or write photos already fetched).
+        Returns the files written."""
+        if photos is None:
+            photos = self.scansplitter().export_scan(pid, s["sid"], tick=prog.set_extra)
         out_dir = self.tc.bucket_dir("images") / self.rel_parent(row)
         out_dir.mkdir(parents=True, exist_ok=True)
         written = []
@@ -315,10 +317,29 @@ class PdfChecker:
             self.save(Path(row["path"]), ss_scans=scans, state="waiting-review", note=f"{waiting} page(s) {why}")
             self.bump("pages-waiting-review", waiting)
             return
+        if not any(s.get("files") for s in scans):  # you took every photo out: not a photo PDF after all
+            self.no_photos(row, pdf, scans)
+            return
         dest = self.move(pdf, self.tc.sorted_dir / "excluded" / "pdf-source", "pdf-source", "all pages split",
                          flat=True)
         self.save(Path(row["path"]), ss_scans=scans, state="done", final_path=str(dest), note="all pages split")
         self.bump("pdfs-split")
+
+    def no_photos(self, row, pdf: Path, scans: list) -> None:
+        """No page of the PDF gave a photo: the PDF goes to quarantine/pdf-uncertain (same sub-folders)."""
+        dest_dir = self.tc.bucket_dir("quarantine/pdf-uncertain") / self.rel_parent(row)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = free_name(dest_dir / pdf.name)
+        sha = sha256_of(pdf)
+        method = transfer(str(pdf), dest, sha, self.tc.verify)
+        trow = self.triage_row(pdf)
+        self.db.action(self.run_id, trow, "pdf-no-photos", str(pdf), str(dest), rule="pdf-check", sha_before=sha,
+                       sha_after=sha, detail=f"{method}; every page approved with no photos")
+        if trow is not None:
+            self.db.update(trow["id"], dest_path=str(dest), current_path=str(dest), bucket="quarantine/pdf-uncertain")
+        self.save(Path(row["path"]), ss_scans=scans, state="done", final_path=str(dest),
+                  note="no photos taken - every page approved with no boxes")
+        self.bump("pdfs-without-photos")
 
     # reprocess: pages approved again after they were exported
     def exported_at(self, row, s: dict) -> datetime | None:
@@ -354,7 +375,7 @@ class PdfChecker:
                         continue
                     approved, exported = parse_time(scan.get("reviewed_at")), self.exported_at(row, s)
                     if approved and (exported is None or approved > exported):
-                        todo.append((row, s, approved, exported))
+                        todo.append((row, s, approved, exported, scan))
             say(f"Pages approved again since they were exported: {len(todo):,}")
             with open(report, "w", newline="", encoding="utf-8") as fh, \
                     Progress("Reprocess" + (" (dry run)" if dry_run else ""), total=len(todo), unit="pages") as prog:
@@ -362,39 +383,75 @@ class PdfChecker:
                 w.writerow(["pdf", "page", "approved", "exported", "outcome", "old photos", "new photos"])
                 if not dry_run and todo:
                     self.send_settings(pid)
-                for row, s, approved, exported in todo:
+                for row, s, approved, exported, scan in todo:
                     pdf = Path(row["final_path"] or row["path"])
                     prog.set_extra(f"{pdf.name} page {s['page']}")
                     old = list(s.get("files") or [])
-                    outcome, new = "would re-export", []
-                    missing = [f for f in old if not os.path.exists(f)]
+                    no_boxes = not scan.get("boxes")
+                    outcome, new = ("would remove its photos (approved with no boxes)" if no_boxes
+                                    else "would re-export"), []
+                    # photos already moved to pdf-reprocessed by an earlier, interrupted reprocess
+                    replaced = {r[0] for r in self.db.db.execute(
+                        "SELECT from_path FROM actions WHERE action='pdf-photo-replaced' AND from_path IN "
+                        f"({','.join('?' * len(old))})", [to_db(f) for f in old])} if old else set()
+                    missing = [f for f in old if not os.path.exists(f) and to_db(f) not in replaced]
                     if missing:
                         outcome = "skipped: earlier photo(s) already moved on - " + "; ".join(missing)[:300]
                         self.bump("skipped-photos-moved-on")
                     elif not dry_run:
-                        for f in old:
-                            dest_dir = self.tc.sorted_dir / "excluded" / "pdf-reprocessed"
-                            dest_dir.mkdir(parents=True, exist_ok=True)
-                            dest = free_name(dest_dir / os.path.basename(f))
-                            sha = sha256_of(f)
-                            method = transfer(f, dest, sha, self.tc.verify)
-                            self.db.action(self.run_id, None, "pdf-photo-replaced", f, str(dest), rule="pdf-reprocess",
-                                           sha_before=sha, sha_after=sha,
-                                           detail=f"{method}; page {s['page']} approved again {approved:%Y-%m-%d %H:%M}")
-                        new = self.export_page(pdf, row, pid, s, prog)
-                        scans = json.loads(self.db.db.execute("SELECT ss_scans FROM pdf_checks WHERE id=?",
-                                                              (row["id"],)).fetchone()[0])
-                        for x in scans:
-                            if x["sid"] == s["sid"]:
-                                x.update(s)
-                        self.save(Path(row["path"]), ss_scans=scans)
-                        outcome = "re-exported"
-                        self.bump("pages-re-exported")
+                        try:
+                            # the new photos first: nothing moves if ScanSplitter can't give them
+                            photos = [] if no_boxes else self.scansplitter().export_scan(pid, s["sid"],
+                                                                                         tick=prog.set_extra)
+                            for f in old:
+                                if not os.path.exists(f):
+                                    continue  # already in pdf-reprocessed
+                                dest_dir = self.tc.sorted_dir / "excluded" / "pdf-reprocessed"
+                                dest_dir.mkdir(parents=True, exist_ok=True)
+                                dest = free_name(dest_dir / os.path.basename(f))
+                                sha = sha256_of(f)
+                                method = transfer(f, dest, sha, self.tc.verify)
+                                self.db.action(self.run_id, None, "pdf-photo-replaced", f, str(dest),
+                                               rule="pdf-reprocess", sha_before=sha, sha_after=sha,
+                                               detail=f"{method}; page {s['page']} approved again "
+                                                      f"{approved:%Y-%m-%d %H:%M}")
+                            new = self.export_page(pdf, row, pid, s, prog, photos=photos)
+                            scans = json.loads(self.db.db.execute("SELECT ss_scans FROM pdf_checks WHERE id=?",
+                                                                  (row["id"],)).fetchone()[0])
+                            for x in scans:
+                                if x["sid"] == s["sid"]:
+                                    x.update(s)
+                            self.save(Path(row["path"]), ss_scans=scans)
+                            if no_boxes:
+                                outcome = "photos removed (approved with no boxes)"
+                                self.bump("pages-now-without-photos")
+                            else:
+                                outcome = "re-exported"
+                                self.bump("pages-re-exported")
+                        except (ScanSplitterDown, KeyboardInterrupt):
+                            raise
+                        except (ScanSplitterError, MoveError, OSError) as exc:
+                            outcome = f"error: {type(exc).__name__}: {exc}"[:400]
+                            say(f"  {pdf.name} page {s['page']}: {outcome}")
+                            self.bump("errors")
                     else:
-                        self.bump("pages-to-re-export")
+                        self.bump("pages-without-photos-now" if no_boxes else "pages-to-re-export")
                     w.writerow([pdf.name, s["page"], approved.isoformat(), exported.isoformat() if exported else "",
                                 outcome, "; ".join(old), "; ".join(new)])
+                    fh.flush()
                     prog.update()
+                if not dry_run:  # a split PDF whose photos you've now all taken out
+                    for pc_id in sorted({row["id"] for row, *_ in todo}):
+                        pc = self.db.db.execute("SELECT * FROM pdf_checks WHERE id=?", (pc_id,)).fetchone()
+                        scans = json.loads(pc["ss_scans"] or "[]")
+                        pdf = Path(pc["final_path"] or pc["path"])
+                        if pc["state"] == "done" and scans and all(s.get("exported") for s in scans) \
+                                and not any(s.get("files") for s in scans) and pdf.is_file():
+                            try:
+                                self.no_photos(pc, pdf, scans)
+                            except (MoveError, OSError) as exc:
+                                say(f"  {pdf.name}: {type(exc).__name__}: {exc}")
+                                self.bump("errors")
         except KeyboardInterrupt:
             status = "interrupted"
             say("Stopped. Pages finished so far are kept; run it again to carry on.")

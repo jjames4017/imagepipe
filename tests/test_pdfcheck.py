@@ -376,3 +376,83 @@ def test_reprocess_project(setup):
     assert (stack / "sorted/excluded/pdf-reprocessed/album_p002_1.jpg").exists()
     assert sorted(p.name for p in images.iterdir()) == ["album_p001_1.jpg", "album_p002_1.jpg"]
     assert pdfcheck.run_reprocess(cfg, pid, dry_run=True)["stats"] == {}   # exported_at now after approval
+
+
+@needs_tools
+def test_reprocess_no_boxes_error_and_recovery(setup, monkeypatch):
+    import time
+    from datetime import datetime, timedelta, timezone
+
+    from imagepipe.scansplitter import ScanSplitter, ScanSplitterError
+
+    cfg, docs, stack = setup
+    (docs / "album.pdf").write_bytes(image_pdf(3))
+    FakeSS.plan = {"album.pdf": [([(900, 900)], [])] * 3}
+    pdfcheck.run_pdf_check(cfg)
+    pid, proj = next(iter(FakeSS.projects.items()))
+    images = stack / "sorted/images/box1"
+    excluded = stack / "sorted/excluded/pdf-reprocessed"
+    time.sleep(1.1)
+    later = (datetime.now(timezone.utc) + timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for sc in proj["scans"]:
+        sc["reviewed_at"] = later
+    proj["scans"][0]["boxes"] = []                      # page 1: you removed every box
+    time.sleep(2.1)
+    bad = proj["scans"][1]["id"]                         # page 2: ScanSplitter fails to export it
+    real = ScanSplitter.export_scan
+
+    def flaky(self, p, sid, **kw):
+        if sid == bad:
+            raise ScanSplitterError("HTTP 500 boom")
+        return real(self, p, sid, **kw)
+
+    monkeypatch.setattr(ScanSplitter, "export_scan", flaky)
+    res = pdfcheck.run_reprocess(cfg, pid)
+    assert res["stats"]["pages-now-without-photos"] == 1 and res["stats"]["pages-re-exported"] == 1
+    assert res["stats"]["errors"] == 1
+    assert (images / "album_p002_1.jpg").exists()        # the failed page's photo stayed where it was
+    assert (excluded / "album_p001_1.jpg").exists() and not (images / "album_p001_1.jpg").exists()
+    # an earlier run that moved page 2's photo and then stopped: the next run carries on
+    from imagepipe.triage import db as tdb
+
+    t = tdb.TriageDB(cfg.triage.database, cfg.tz, None)
+    (images / "album_p002_1.jpg").rename(excluded / "album_p002_1.jpg")
+    t.action(None, None, "pdf-photo-replaced", str(images / "album_p002_1.jpg"), str(excluded / "album_p002_1.jpg"))
+    t.db.commit()
+    t.close()
+    monkeypatch.setattr(ScanSplitter, "export_scan", real)
+    res = pdfcheck.run_reprocess(cfg, pid)
+    assert res["stats"] == {"pages-re-exported": 1, "photos-exported": 1}
+    assert (images / "album_p002_1.jpg").exists()
+
+
+@needs_tools
+def test_pdf_without_photos_goes_to_uncertain(setup):
+    import time
+    from datetime import datetime, timedelta, timezone
+
+    cfg, docs, stack = setup
+    # waiting for review; you remove every box and approve
+    (docs / "notes.pdf").write_bytes(image_pdf(1))
+    FakeSS.plan = {"notes.pdf": [([(900, 900)], ["edge"])]}
+    pdfcheck.run_pdf_check(cfg)
+    proj = next(iter(FakeSS.projects.values()))
+    proj["scans"][0]["boxes"], proj["scans"][0]["status"] = [], "approved"
+    res = pdfcheck.run_pdf_check(cfg)
+    assert res["stats"]["pdfs-without-photos"] == 1
+    assert (stack / "sorted/quarantine/pdf-uncertain/box1/notes.pdf").exists()
+    # split already; you take the photo back out and reprocess
+    (docs / "split.pdf").write_bytes(image_pdf(1))
+    FakeSS.plan["split.pdf"] = [([(900, 900)], [])]
+    pdfcheck.run_pdf_check(cfg)
+    assert (stack / "sorted/excluded/pdf-source/split.pdf").exists()
+    pid = [k for k, v in FakeSS.projects.items() if any(s["original_name"] == "split.pdf" for s in v["scans"])][0]
+    scan = [s for s in FakeSS.projects[pid]["scans"] if s["original_name"] == "split.pdf"][0]
+    time.sleep(1.1)
+    scan["boxes"] = []
+    scan["reviewed_at"] = (datetime.now(timezone.utc) + timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    time.sleep(2.1)
+    res = pdfcheck.run_reprocess(cfg, pid)
+    assert res["stats"]["pages-now-without-photos"] == 1 and res["stats"]["pdfs-without-photos"] == 1
+    assert (stack / "sorted/quarantine/pdf-uncertain/box1/split.pdf").exists()
+    assert (stack / "sorted/excluded/pdf-reprocessed/split_p001_1.jpg").exists()
