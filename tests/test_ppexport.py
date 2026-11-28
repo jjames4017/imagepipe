@@ -97,6 +97,8 @@ def setup(tmp_path, monkeypatch):
     (b / "live.jpg").write_bytes(jpeg(color=(9, 9, 9)))
     (b / "live.mov").write_bytes(b"moov fake clip")
     (b / "a.jpg.yml").write_text("PhotoPrism sidecar")
+    (b / "a.jpg.xmp").write_text("<x:xmpmeta/>")                     # AI sidecar PhotoPrism lists with the photo
+    (b / "loose.jpg.xmp").write_text("<x:xmpmeta/>")                 # one it doesn't
     (b / "notes.txt").write_text("not a photo")
     (orig / "library").mkdir()
     (orig / "library" / "cache.bin").write_bytes(b"x")
@@ -108,7 +110,8 @@ def setup(tmp_path, monkeypatch):
                           {"Type": "face", "Name": "", "X": 0.5, "Y": 0.5, "W": 0.1, "H": 0.1},
                           {"Type": "face", "Name": "Bob", "X": 0.6, "Y": 0.1, "W": 0.1, "H": 0.1, "SubjSrc": "marker"},
                           {"Type": "face", "Name": "Gone", "X": 0.6, "Y": 0.1, "W": 0.1, "H": 0.1, "Invalid": True}]},
-                     {"UID": "fy", "Name": "batch_01/trip/a.jpg.yml", "Root": "sidecar", "Hash": "x"}],
+                     {"UID": "fy", "Name": "batch_01/trip/a.jpg.yml", "Root": "sidecar", "Hash": "x"},
+                     {"UID": "fx", "Name": "batch_01/trip/a.jpg.xmp", "Root": "/", "Sidecar": True, "Hash": "y"}],
               Title="Beach day", TitleSrc="manual", Caption="AI words", CaptionSrc="ollama", Favorite=True,
               Details={"Keywords": "sand, sea", "KeywordsSrc": "manual"},
               Albums=[{"Type": "album", "Title": "Holidays"}, {"Type": "folder", "Title": "trip"},
@@ -166,6 +169,7 @@ def test_export(tmp_path, monkeypatch):
         before = {p: p.read_bytes() for p in orig.rglob("*") if p.is_file()}
         dry = run_export(cfg, dry_run=True)
         assert dry["stats"]["would-write"] == 2 and not (stack / "imagepipe" / "intake").exists()
+        assert dry["stats"]["left-out"] == 3          # a.jpg.xmp (listed), loose.jpg.xmp, a.jpg.yml
         res = run_export(cfg)
         assert res["status"] == "finished"
         assert {p: p.read_bytes() for p in orig.rglob("*") if p.is_file()} == before   # originals untouched

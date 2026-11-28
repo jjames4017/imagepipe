@@ -37,7 +37,7 @@ as they are. Everything PhotoPrism estimated is left for ImagePipe's own checks.
   which are all taken before any batch from `sorted/`.
 - Anything else in the originals → `<filestack>/triage/intake/photoprism/`, for
   triage (add that folder as a triage source when you want it sorted).
-- PhotoPrism's own `.yml` sidecars and the folders under `exclude` are not copied.
+- Files and folders matching `exclude` are not copied at all, even when PhotoPrism lists them as part of a photo: by default PhotoPrism's own `.yml` sidecars and the `.xmp` sidecars an earlier AI tagging run left beside the photos (AI descriptions and keywords, dates without times). They stay in the originals; the report counts them as `left-out`.
 
 Each copy is made next to its destination, checked against PhotoPrism's SHA-1 of
 the original, written into, checked again (it must still open), then renamed into

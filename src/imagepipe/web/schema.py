@@ -161,8 +161,9 @@ PPEXPORT = [
      "default": "/mnt/appdata/imagelibrary",
      "help": "Mount it read-only in the ImagePipe container. Uses the PhotoPrism address and login in External tools"},
     {"key": "exclude", "type": "list", "label": "Leave out (folders or file names)",
-     "default": ["imagepipe", "library", ".ppignore", "*.yml"],
-     "help": "Top-level folders or file-name patterns in the originals that aren't copied (PhotoPrism's .yml sidecars)"},
+     "default": ["imagepipe", "library", ".ppignore", "*.yml", "*.xmp"],
+     "help": "Top-level folders or file-name patterns in the originals that aren't copied at all, photo files "
+             "included (PhotoPrism's .yml sidecars; the .xmp sidecars from an earlier AI tagging run)"},
     {"key": "faces", "type": "choice", "label": "Faces to write", "choices": ["all", "manual"], "default": "all",
      "help": "all: every face PhotoPrism has a name for; manual: only faces you named yourself"},
     {"key": "favourite_tag", "type": "str", "label": "Favourite tag", "default": "Favourite",
