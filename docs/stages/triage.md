@@ -454,8 +454,8 @@ bundle, processed master, album folders or manifest is ever asked for.
 With **Approval** set to `auto` (Settings > External tools > ScanSplitter, the
 default), pages ScanSplitter raised no CHECK flag for are approved by ImagePipe
 and their photos exported straight away to `sorted/images/` (same folders as the PDF,
-named `<PDF name>_p<page>_<n>.jpg`). Pages with a CHECK flag wait for you in
-ScanSplitter's Projects page: fix the boxes and approve them there (or delete a
+named `<PDF name>_p<page>_<n>.jpg`). With `review`, every page waits for you.
+Pages with a CHECK flag always wait for you in ScanSplitter's Projects page: fix the boxes and approve them there (or delete a
 page to skip it). Every later run exports the pages you approved. When all
 pages of a PDF are done the PDF moves to `sorted/excluded/pdf-source/`.
 ScanSplitter's own Deliver is never used. A run's project is deleted again at
