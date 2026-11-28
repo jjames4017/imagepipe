@@ -63,6 +63,23 @@ def test_scorer():
     assert s.folder("DCIM") == 0 and s.folder("New folder") == 0 and s.folder("Stuff2") == 0
 
 
+def test_scorer_ignore_words_and_case():
+    s = Scorer(DEFAULT_BACKUP_WORDS, ["onedrive*", "USBDrive*", "Tehalls*"])
+    assert s.folder("onedrive-zip") == 0 and s.folder("USBDrives") == 0 and s.folder("usbdrives") == 0
+    assert s.folder("Tehalls_Backup") == 0          # ignore words are checked first
+    cs = Scorer(["Backup"], ["USBDrive*"], case_insensitive=False)
+    assert cs.folder("usbdrives") == 1 and cs.folder("USBDrives") == 0
+    assert cs.folder("BACKUP stuff") == 1 and cs.folder("Backup stuff") == -2
+
+
+def test_skip_categories(env):
+    c, t, add, stack = env
+    k, kpath = add("web-pages", "Page_files/a.css", content=b"css")
+    d, dpath = add("web-pages", "Other_files/a.css", content=b"css")
+    assert run_dedupe(c)["stats"] == {}
+    assert kpath.exists() and dpath.exists()
+
+
 def test_keeper_by_folder_then_oldest(env):
     c, t, add, stack = env
     k, kpath = add("documents", "file cabinet/Whakapapa/chart.pdf")

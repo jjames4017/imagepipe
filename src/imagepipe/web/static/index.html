@@ -594,9 +594,13 @@ function renderForm(data) {
     out.push(`</div>`);
   }
   const form = $("#s-form");
-  form.innerHTML = out.join("");
+  const bar = `<div class="row" id="s-tabs" style="margin-bottom:10px">${SCHEMA.map((s, i) =>
+    `<button class="b" type="button" data-stab="${i}">${esc(s.label)}</button>`).join("")}</div>`;
+  form.innerHTML = bar + out.join("");
+  showSettingsTab(SETTAB);
   form.onclick = e => {
     const t = e.target;
+    if (t.matches("#s-tabs [data-stab]")) showSettingsTab(Number(t.dataset.stab));
     if (t.matches("[data-remove]")) t.closest(".rec").remove();
     if (t.matches("[data-remove-row]")) t.closest("[data-maprow]").remove();
     if (t.matches("[data-remove-cat]")) t.closest("[data-catrow]").remove();
@@ -610,6 +614,12 @@ function renderForm(data) {
       list.insertAdjacentHTML("beforeend", recordHtml(f, {}, [...p.split("."), list.children.length + Date.now()]));
     }
   };
+}
+let SETTAB = 0;
+function showSettingsTab(i) {
+  SETTAB = Math.min(Math.max(0, i), SCHEMA.length - 1);
+  $$("#s-form > .card").forEach((c, k) => { c.style.display = k === SETTAB ? "" : "none"; });
+  $$("#s-tabs [data-stab]").forEach(b => b.classList.toggle("primary", Number(b.dataset.stab) === SETTAB));
 }
 async function testTool(tool, path) {
   const values = {};
