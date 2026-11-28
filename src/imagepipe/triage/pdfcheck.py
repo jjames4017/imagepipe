@@ -394,14 +394,15 @@ class PdfChecker:
             return
         # photo pages: approve the pages ScanSplitter is sure about, then export what's approved
         entries = []
+        auto = (self.ss_cfg.approval if self.ss_cfg else "auto") == "auto"
         for page_no, scan in sorted(scans.items()):
-            if scan.get("boxes") and not scan.get("flags"):
+            if auto and scan.get("boxes") and not scan.get("flags"):
                 ss.approve(project, scan["id"])
             entries.append({"sid": scan["id"], "page": page_no, "exported": False, "files": []})
-        checks = sum(1 for s in scans.values() if s.get("flags"))
+        checks = sum(1 for s in scans.values() if s.get("flags") or not auto)
         self.save(pdf, **base, pages=count, verdict=verdict, state="waiting-review", page_detail=pages,
                   ss_project=project, ss_scans=entries, final_path=str(pdf),
-                  note=f"{count - checks} page(s) approved automatically, {checks} with a CHECK flag")
+                  note=f"{count - checks} page(s) approved automatically, {checks} waiting for review")
         row = self.db.db.execute("SELECT * FROM pdf_checks WHERE path=?", (to_db(str(pdf)),)).fetchone()
         self.export_ready(row, prog)
 

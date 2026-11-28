@@ -45,6 +45,7 @@ class ScanSplitterTool:
     quality: int = 100
     include_gps: bool = False
     max_pdfs_per_project: int = 200          # a run starts a new project when one holds this many photo PDFs
+    approval: str = "auto"                   # auto: pages without a CHECK flag approved by ImagePipe; review: you
 
     def project_settings(self) -> dict:
         """The settings dict for ScanSplitter's PATCH /api/projects/{pid}."""
@@ -60,6 +61,7 @@ SS_DETECTION = ("scansplitterv7", "scansplitterv5", "scansplitterv4", "scansplit
 SS_LAYOUT = ("auto", "single", "spread")
 SS_EDGE = ("off", "conservative", "tight")
 SS_FORMAT = ("jpeg", "png")
+SS_APPROVAL = ("auto", "review")
 
 
 def _bool(name: str, v) -> bool:
@@ -92,7 +94,7 @@ def _parse_scansplitter(raw: dict) -> ScanSplitterTool:
             out[f.name] = str(v).strip()
     t = ScanSplitterTool(**out)
     for name, allowed in (("detection_mode", SS_DETECTION), ("album_layout", SS_LAYOUT),
-                          ("edge_cleanup", SS_EDGE), ("format", SS_FORMAT)):
+                          ("edge_cleanup", SS_EDGE), ("format", SS_FORMAT), ("approval", SS_APPROVAL)):
         if getattr(t, name) not in allowed:
             raise ConfigError(f"tools.scansplitter.{name} must be one of: {', '.join(allowed)}")
     if not (0 < t.min_area < t.max_area <= 100):

@@ -311,3 +311,16 @@ def test_project_settings_and_max_pdfs(setup):
     assert all(p["settings"] == want for p in projects)
     assert want["min_area_ratio"] == 2.0 and want["max_area_ratio"] == 100.0 and want["quality"] == 100
     assert want["auto_deskew"] and want["restore_color"] and want["upscale_2x"] and not want["include_gps"]
+
+
+@needs_tools
+def test_approval_review_mode(setup):
+    cfg, docs, stack = setup
+    cfg.tools.scansplitter.approval = "review"
+    (docs / "album.pdf").write_bytes(image_pdf(1))
+    FakeSS.plan = {"album.pdf": [([(900, 900)], [])]}          # no CHECK flag
+    res = pdfcheck.run_pdf_check(cfg)
+    assert res["stats"]["pages-waiting-review"] == 1
+    assert not (stack / "sorted/images").exists()             # nothing exported until you approve it
+    scan = next(iter(FakeSS.projects.values()))["scans"][0]
+    assert scan["status"] == "needs_review"
