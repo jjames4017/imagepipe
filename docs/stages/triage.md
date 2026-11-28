@@ -62,6 +62,8 @@ folder named after the source:
 | `imagepipe triage apply [--limit N]` | Carries out the plan | **Yes - moves files** |
 | `imagepipe triage status` | Counts by status and bucket, recent runs | No |
 | `imagepipe triage export-csv` | Every file in the triage database, one CSV | No |
+| `imagepipe triage dedupe --dry-run` | Finds identical files and writes the report of what would happen | No |
+| `imagepipe triage dedupe` | Keeps one copy of each set of identical files - see [Remove duplicates](#remove-duplicates) | **Yes - moves files** |
 | `imagepipe triage check-pdfs [--limit N]` | Sorts the PDFs in `sorted/documents` - see [Check PDFs](#check-pdfs) | **Yes - moves PDFs, writes photos** |
 | `imagepipe triage relocate [--dry-run]` | Moves files sorted before 0.4 from the old folders into the filestack | **Yes - moves files** |
 
@@ -466,3 +468,42 @@ status` shows the counts by verdict.
 Needs ScanSplitter's address (Settings > External tools); the Docker image
 includes Tesseract and Poppler. If ScanSplitter can't be reached the job stops
 without changing anything for the PDF it was on.
+
+## Remove duplicates
+
+`imagepipe triage dedupe` (Run tab: **Find duplicates (dry run)** and **Remove
+duplicates**) finds byte-identical files among everything triage has sorted,
+using the SHA-256 the scan recorded, keeps one copy of each set and moves the
+others to `sorted/excluded/triage-duplicate/`. Nothing is deleted. Run it after
+each apply, and before **Check PDFs**, so the same file is never checked or
+reviewed twice.
+
+Which copy is kept:
+
+1. a copy already processed: the keeper from an earlier run, then a PDF already
+   split, then a PDF waiting for review in ScanSplitter
+2. the copy in the most meaningful folder. Each folder of the original path
+   scores +1 if its name says something (`Whakapapa`, `Bali 2014`), 0 if it is
+   generic (`DCIM`, `Documents`, `New folder` ..., plus the **extra generic
+   folder names** setting), -2 if it holds a word from the **backup / temporary
+   folder words** setting (whole words in any case: `PhotoTemp` is Photo + Temp,
+   so `temp` matches; `Golden Bay` doesn't match `old`). A file taken out of an
+   archive scores -2 more. Both lists are in Settings > Triage; add to them when
+   you find more
+3. the oldest: the date triage found for the file, then its modified time
+
+Companion files (sidecars, Live Photo clips) aren't compared on their own; they
+belong to their main file. A duplicate's companions move beside the kept file
+(renamed to match it) when it has none of that kind. **Images:** when both
+copies have sidecars, both copies stay so ImagePipe stage 4 can merge their
+metadata.
+
+PDFs: a duplicate waiting for review has its pages taken out of its ScanSplitter
+project; a duplicate already split stays in `excluded/pdf-source` and is only
+recorded.
+
+Every duplicate is recorded against the kept copy (the `duplicates` table in the
+triage database, `actions.csv`, and `dedupe-<time>/duplicates.csv` with each
+copy's score, date, original place and outcome). Only identical files are found:
+the same document saved or scanned twice is not, and ImagePipe's own duplicate
+checks still run later.

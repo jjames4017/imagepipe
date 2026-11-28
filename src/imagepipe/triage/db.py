@@ -143,6 +143,22 @@ CREATE TABLE IF NOT EXISTS pdf_checks (
     updated_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_pdf_state ON pdf_checks (state);
+
+-- Remove duplicates: one row per copy that isn't the keeper of its group of identical files.
+CREATE TABLE IF NOT EXISTS duplicates (
+    id         INTEGER PRIMARY KEY,
+    file_id    INTEGER NOT NULL UNIQUE,  -- the duplicate copy
+    keeper_id  INTEGER NOT NULL,         -- the copy kept
+    sha256     TEXT NOT NULL,
+    origin     TEXT,                     -- where the duplicate was found originally
+    outcome    TEXT NOT NULL,            -- excluded | passed-to-stage-4 | already-split
+    moved_to   TEXT,
+    run_id     INTEGER,
+    created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_dup_keeper ON duplicates (keeper_id);
+CREATE INDEX IF NOT EXISTS idx_pdf_final ON pdf_checks (final_path);
+CREATE INDEX IF NOT EXISTS idx_tfiles_companion ON files (companion_of);
 """
 
 ACTION_COLUMNS = ("ts", "run_id", "triage_id", "action", "from_path", "to_path", "rule",

@@ -104,6 +104,12 @@
           <span class="muted">limit</span><input type="number" id="t-limit" min="1" placeholder="all" style="width:110px">
         </div>
         <div class="row muted" id="planned"></div>
+        <h2 style="margin-top:16px">Duplicates</h2>
+        <p class="sub">Keeps one copy of each set of identical files (already-processed copy, then the most meaningful
+          folder, then the oldest) and moves the rest to sorted/excluded/triage-duplicate. Run the dry run first and
+          check its report on the Reports tab.</p>
+        <div class="row"><button class="b" data-job="triage-dedupe-dry">Find duplicates (dry run)</button>
+          <button class="b danger" data-job="triage-dedupe">Remove duplicates - moves files</button></div>
         <h2 style="margin-top:16px">PDFs</h2>
         <p class="sub">Checks every PDF in sorted/documents not checked yet: documents stay, photo scans are split by
           ScanSplitter into sorted/images (pages with a CHECK flag wait for you in ScanSplitter's Projects page and are
@@ -293,6 +299,8 @@ $$("[data-job]").forEach(b => b.onclick = async () => {
   if (kind === "catalogue") options.retry_errors = $("#c-retry").checked;
   if (kind.startsWith("phase2")) options.batch = $("#p2-batch").value;
   if (kind === "triage-check-pdfs") options.limit = $("#pdf-limit").value;
+  if (kind === "triage-dedupe" && !confirm("Remove duplicates?\n\nIt MOVES every copy but one of each set of identical " +
+      "files to sorted/excluded/triage-duplicate (nothing is deleted), and takes duplicate PDFs' pages out of ScanSplitter.")) return;
   if (kind === "phase2-run" && !confirm("Run phase 2 on " + (options.batch || "the next waiting batch") +
       "?\n\nIt MOVES that batch's photos from sorted/ into imagepipe/processing/, writes the ID into each kept file " +
       "(a checked copy is swapped in; RAW files get a sidecar), and moves exact duplicates and photos that don't decode " +

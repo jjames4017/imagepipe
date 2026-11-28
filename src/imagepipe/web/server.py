@@ -45,6 +45,8 @@ JOBS = {
     "triage-apply": "Triage: apply (moves files)",
     "triage-export-csv": "Triage: export CSV",
     "triage-check-pdfs": "Triage: check PDFs",
+    "triage-dedupe-dry": "Triage: find duplicates (dry run)",
+    "triage-dedupe": "Triage: remove duplicates",
     "phase2-find": "Phase 2: find photos and make batches",
     "phase2-run": "Phase 2: run one batch (stages 1, 2, 4)",
     "phase2-ready-check": "Phase 2: ready check",
@@ -80,6 +82,10 @@ def build_argv(job: str, opts: dict) -> list[str]:
         return ["triage", "apply"] + (["--limit", limit] if limit else [])
     if job == "triage-export-csv":
         return ["triage", "export-csv"]
+    if job == "triage-dedupe-dry":
+        return ["triage", "dedupe", "--dry-run"]
+    if job == "triage-dedupe":
+        return ["triage", "dedupe"]
     if job == "triage-check-pdfs":
         limit = str(opts.get("limit") or "").strip()
         if limit and not (limit.isdigit() and int(limit) > 0):

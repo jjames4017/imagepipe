@@ -41,6 +41,10 @@ def parse_size(value, key: str) -> int:
     return int(float(m.group(1)) * _UNITS[m.group(2).upper()])
 
 
+DEFAULT_BACKUP_WORDS = ("backup", "backups", "temp", "tmp", "copy", "copies", "old", "archive", "archives",
+                        "download", "downloads", "drive_backup", "phototemp")
+
+
 @dataclass
 class TriageConfig:
     database: Path
@@ -58,6 +62,10 @@ class TriageConfig:
     max_extract_bytes: int = 200 << 30
     smartname_max_length: int = 80
     pdf_text_words: int = 7        # a PDF with a page holding more words than this is a document
+    # Duplicates: folder words that mark a backup/temporary copy (-2 each), and extra generic
+    # folder names (0) on top of the built-in ones. Any other folder name scores +1.
+    dedupe_backup_words: list = field(default_factory=lambda: list(DEFAULT_BACKUP_WORDS))
+    dedupe_generic_folders: list = field(default_factory=list)
     categories: dict[str, dict] = field(default_factory=dict)  # name -> {pipeline, extensions}
     overrides: dict[str, str] = field(default_factory=dict)    # ext -> bucket, where it differs from the defaults
     legacy_destinations: dict[str, Path] = field(default_factory=dict)
@@ -92,7 +100,7 @@ class TriageConfig:
 KNOWN = {
     "database", "log_dir", "reports_dir", "sources", "workers", "verify", "categories",
     "embed_metadata", "reverse_geocode", "day_first", "live_photo_max_bytes", "max_archive_depth",
-    "max_extract_bytes", "smartname_max_length", "pdf_text_words",
+    "max_extract_bytes", "smartname_max_length", "pdf_text_words", "dedupe_backup_words", "dedupe_generic_folders",
     "pdf_photo_coverage", "pdf_text_chars",  # 0.5.0-0.5.1 PDF check settings: accepted, no longer used
     # before 0.4: kept so `imagepipe triage relocate` knows where files were; not used otherwise
     "destinations", "work_dir", "bucket_overrides",
@@ -166,6 +174,8 @@ def parse_triage(data: dict | None) -> TriageConfig | None:
         max_extract_bytes=parse_size(data.get("max_extract_bytes", "200GB"), "max_extract_bytes"),
         smartname_max_length=int(data.get("smartname_max_length", 80)),
         pdf_text_words=int(data.get("pdf_text_words", 7)),
+        dedupe_backup_words=_word_list(data.get("dedupe_backup_words"), DEFAULT_BACKUP_WORDS, "dedupe_backup_words"),
+        dedupe_generic_folders=_word_list(data.get("dedupe_generic_folders"), (), "dedupe_generic_folders"),
         categories=categories,
         overrides=overrides,
         legacy_destinations=legacy_destinations,
@@ -233,3 +243,11 @@ def parse_categories(raw) -> tuple[dict[str, dict], dict[str, str]]:
         categories.setdefault(need, {"pipeline": DEFAULT_CATEGORIES[need]["pipeline"], "extensions": []})
     overrides = {e: c for e, c in owner.items() if DEFAULT_EXT_CATEGORY.get(e) != c}
     return categories, overrides
+
+
+def _word_list(raw, default, key: str) -> list:
+    if raw is None:
+        return list(default)
+    if not isinstance(raw, list):
+        raise ConfigError(f"triage.{key} must be a list")
+    return [str(w).strip() for w in raw if str(w).strip()]
