@@ -223,6 +223,33 @@ def cmd_triage_dedupe(cfg, args) -> int:
     return 130
 
 
+def cmd_triage_reprocess_pdfs(cfg, args) -> int:
+    from imagepipe.triage.pdfcheck import run_reprocess
+
+    _triage_cfg(cfg)
+    try:
+        result = run_reprocess(cfg, args.project, dry_run=args.dry_run)
+    except Exception as exc:
+        log.exception("Reprocess failed")
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    body = ", ".join(f"{v:,} {k}" for k, v in sorted(result["stats"].items())) or "nothing to reprocess"
+    print(("Dry run - nothing changed: " if args.dry_run else "Reprocess: ") + body)
+    return 0 if result["status"] == "finished" else 130
+
+
+def cmd_triage_pdf_projects(cfg, args) -> int:
+    from imagepipe.triage.pdfcheck import projects
+
+    _triage_cfg(cfg)
+    rows = projects(cfg)
+    if not rows:
+        print("No ScanSplitter projects recorded.")
+    for p in rows:
+        print(f"{p['id']}  {p['name'] or '-'}  {p['pdfs']:,} PDFs, {p['pages']:,} pages, {p['waiting']:,} waiting")
+    return 0
+
+
 def cmd_triage_check_pdfs(cfg, args) -> int:
     from imagepipe.triage.pdfcheck import run_pdf_check
 
@@ -447,6 +474,13 @@ def build_parser() -> argparse.ArgumentParser:
                           "sorted/excluded/triage-duplicate")
     tdd.add_argument("--dry-run", action="store_true", help="only write the report of what would happen")
     tdd.set_defaults(func=cmd_triage_dedupe)
+    trp = tsub.add_parser("reprocess-pdfs", help="re-export the pages of a ScanSplitter project approved again since "
+                          "they were exported; earlier photos go to sorted/excluded/pdf-reprocessed")
+    trp.add_argument("--project", required=True, help="ScanSplitter project id (see 'triage pdf-projects')")
+    trp.add_argument("--dry-run", action="store_true", help="only list the pages that would be re-exported")
+    trp.set_defaults(func=cmd_triage_reprocess_pdfs)
+    tpp = tsub.add_parser("pdf-projects", help="the ScanSplitter projects Check PDFs made")
+    tpp.set_defaults(func=cmd_triage_pdf_projects)
     tc_ = tsub.add_parser("check-pdfs", help="sort the PDFs in sorted/documents into documents, photo scans "
                           "(split by ScanSplitter) and uncertain")
     tc_.add_argument("--limit", type=int, help="check at most this many new PDFs (for a trial run); PDFs waiting "

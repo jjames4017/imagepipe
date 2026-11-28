@@ -116,6 +116,12 @@
           picked up next run), uncertain ones go to sorted/quarantine/pdf-uncertain.</p>
         <div class="row"><button class="b" data-job="triage-check-pdfs">Check PDFs</button>
           <span class="muted">limit</span><input type="number" id="pdf-limit" min="1" placeholder="all" style="width:110px"></div>
+        <p class="sub">Reprocess: re-export the pages of a project you approved again after they were exported; the
+          earlier photos move to sorted/excluded/pdf-reprocessed.</p>
+        <div class="row"><select id="pdf-project" style="min-width:320px"><option value="">(load projects)</option></select>
+          <button class="b" id="pdf-projects-load">Load projects</button>
+          <button class="b" data-job="triage-reprocess-dry">Reprocess (dry run)</button>
+          <button class="b danger" data-job="triage-reprocess">Reprocess - moves files</button></div>
       </div>
       <div class="card">
         <h2>Catalogue</h2>
@@ -299,6 +305,9 @@ $$("[data-job]").forEach(b => b.onclick = async () => {
   if (kind === "catalogue") options.retry_errors = $("#c-retry").checked;
   if (kind.startsWith("phase2")) options.batch = $("#p2-batch").value;
   if (kind === "triage-check-pdfs") options.limit = $("#pdf-limit").value;
+  if (kind.startsWith("triage-reprocess")) options.project = $("#pdf-project").value;
+  if (kind === "triage-reprocess" && !confirm("Reprocess this project?\n\nPages approved again since they were exported " +
+      "are exported again; their earlier photos MOVE to sorted/excluded/pdf-reprocessed.")) return;
   if (kind === "triage-dedupe" && !confirm("Remove duplicates?\n\nIt MOVES every copy but one of each set of identical " +
       "files to sorted/excluded/triage-duplicate (nothing is deleted), and takes duplicate PDFs' pages out of ScanSplitter.")) return;
   if (kind === "phase2-run" && !confirm("Run phase 2 on " + (options.batch || "the next waiting batch") +
@@ -406,6 +415,18 @@ async function loadActions(off) {
 $("#a-go").onclick = () => loadActions(0); $("#a-kind").onchange = () => loadActions(0);
 $("#a-q").onkeydown = e => { if (e.key === "Enter") loadActions(0); };
 $("#a-prev").onclick = () => loadActions(aOff - PAGE); $("#a-next").onclick = () => loadActions(aOff + PAGE);
+
+// ---------- PDF projects (reprocess)
+$("#pdf-projects-load").onclick = async () => {
+  const sel = $("#pdf-project");
+  sel.innerHTML = `<option value="">loading...</option>`;
+  try {
+    const r = await api("/api/pdf-projects");
+    sel.innerHTML = r.projects.length ? r.projects.map(p => `<option value="${esc(p.id)}">${esc(p.name || p.id)} - ` +
+      `${p.pdfs.toLocaleString()} PDFs, ${p.pages.toLocaleString()} pages, ${p.waiting.toLocaleString()} waiting</option>`).join("")
+      : `<option value="">no projects recorded</option>`;
+  } catch (e) { sel.innerHTML = `<option value="">${esc(e.message)}</option>`; }
+};
 
 // ---------- conflicts
 let cfOff = 0; const CF_PAGE = 25;

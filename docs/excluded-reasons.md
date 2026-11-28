@@ -48,4 +48,5 @@ One file, `<reports_dir>/excluded.csv`, appended one row per excluded file:
 | Folder | Why |
 |---|---|
 | `sorted/excluded/triage-duplicate/` | Byte-identical copy of a file triage kept elsewhere - see [Remove duplicates](stages/triage.md#remove-duplicates) |
+| `sorted/excluded/pdf-reprocessed/` | Photos from a PDF page that was approved again and exported again - see [Reprocess](stages/triage.md#reprocess-a-pdf-project) |
 | `sorted/excluded/pdf-source/` | A photo PDF whose pages were split into photos - see [Check PDFs](stages/triage.md#check-pdfs) |

@@ -112,9 +112,10 @@ TOOLS = [
                 {"key": "include_gps", "type": "bool", "label": "Include GPS", "default": False},
                 {"key": "max_pdfs_per_project", "type": "int", "label": "Most PDFs per project", "default": 200},
                 {"key": "approval", "type": "choice", "label": "Approval", "default": "auto",
-                 "choices": ["auto", "review"],
+                 "choices": ["auto", "review", "project"],
                  "help": "auto: pages ScanSplitter raised no CHECK flag for are approved and exported straight away; "
-                         "review: every page waits for you to approve it in ScanSplitter"}]},
+                         "review: every page waits for you to approve it in ScanSplitter; project: every page waits "
+                         "for you, and nothing from a project is exported until every page in it is approved"}]},
     {"key": "photoprism", "type": "group", "label": "PhotoPrism", "test": True,
      "help": "Test calls /api/v1/status and, with a username and password, checks the login (signing out again)",
      "fields": [{"key": "url", "type": "str", "label": "Address", "placeholder": "http://<host>:2342"},

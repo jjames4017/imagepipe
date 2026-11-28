@@ -47,6 +47,8 @@ JOBS = {
     "triage-check-pdfs": "Triage: check PDFs",
     "triage-dedupe-dry": "Triage: find duplicates (dry run)",
     "triage-dedupe": "Triage: remove duplicates",
+    "triage-reprocess-dry": "Triage: reprocess PDF project (dry run)",
+    "triage-reprocess": "Triage: reprocess PDF project",
     "phase2-find": "Phase 2: find photos and make batches",
     "phase2-run": "Phase 2: run one batch (stages 1, 2, 4)",
     "phase2-ready-check": "Phase 2: ready check",
@@ -82,6 +84,11 @@ def build_argv(job: str, opts: dict) -> list[str]:
         return ["triage", "apply"] + (["--limit", limit] if limit else [])
     if job == "triage-export-csv":
         return ["triage", "export-csv"]
+    if job in ("triage-reprocess-dry", "triage-reprocess"):
+        project = str(opts.get("project") or "").strip()
+        if not project or not all(c.isalnum() or c in "-_" for c in project):
+            raise ValueError("Choose a ScanSplitter project first")
+        return ["triage", "reprocess-pdfs", "--project", project] + (["--dry-run"] if job.endswith("-dry") else [])
     if job == "triage-dedupe-dry":
         return ["triage", "dedupe", "--dry-run"]
     if job == "triage-dedupe":
@@ -596,6 +603,10 @@ def make_handler(app: App):
                     self._json(app.action_rows(q))
                 elif url.path == "/api/reports":
                     self._json(app.reports())
+                elif url.path == "/api/pdf-projects":
+                    from imagepipe.triage.pdfcheck import projects
+
+                    self._json({"projects": projects(app.cfg())})
                 elif url.path == "/api/conflicts":
                     self._json(app.conflicts(q))
                 elif url.path == "/api/thumb":

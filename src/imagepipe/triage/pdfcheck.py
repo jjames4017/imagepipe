@@ -24,6 +24,7 @@ page too big for it to decode), also go to <filestack>/sorted/quarantine/pdf-unc
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import os
@@ -130,6 +131,8 @@ class PdfChecker:
         self.project_pdfs = 0              # photo PDFs kept in the current project
         self.settings_sent: set[str] = set()
         self.ss_cfg = cfg.tools.scansplitter if cfg.tools else None
+        self.approval = self.ss_cfg.approval if self.ss_cfg else "auto"
+        self._live: dict[str, dict] = {}
         self.stats: dict[str, int] = {}
 
     # helpers
@@ -234,12 +237,48 @@ class PdfChecker:
             except ScanSplitterError:
                 pass
 
+    def live_scans(self, pid: str, fresh: bool = False) -> dict:
+        """{scan id: scan} of a project, read once per run (a big project is slow to read)."""
+        if fresh or pid not in self._live:
+            self._live[pid] = {s["id"]: s for s in self.scansplitter().project(pid).get("scans", [])}
+        return self._live[pid]
+
+    def project_complete(self, pid: str) -> bool:
+        """Every page left in the project is approved (Approval: project)."""
+        return all(s.get("status") in ("approved", "auto_approved") for s in self.live_scans(pid).values())
+
+    def rel_parent(self, row) -> Path:
+        """The PDF's folder below sorted/documents (where it was checked)."""
+        try:
+            return Path(row["path"]).relative_to(self.tc.bucket_dir("documents")).parent
+        except ValueError:
+            return Path()
+
+    def export_page(self, pdf: Path, row, pid: str, s: dict, prog) -> list[str]:
+        """Export one approved page's photos to sorted/images. Returns the files written."""
+        photos = self.scansplitter().export_scan(pid, s["sid"], tick=prog.set_extra)
+        out_dir = self.tc.bucket_dir("images") / self.rel_parent(row)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        written = []
+        for n, (name, data) in enumerate(photos, 1):
+            ext = Path(name).suffix.lower() or ".jpg"
+            dest = free_name(out_dir / f"{pdf.stem}_p{s['page']:03d}_{n}{ext}")
+            with open(dest, "xb") as fh:
+                fh.write(data)
+                fh.flush()
+                os.fsync(fh.fileno())
+            self.db.action(self.run_id, None, "pdf-photo-exported", str(pdf), str(dest), rule="pdf-check",
+                           detail=f"page {s['page']}, photo {n}, ScanSplitter project {pid}")
+            written.append(str(dest))
+        s["exported"], s["files"], s["exported_at"] = True, written, self.db.now()
+        self.bump("photos-exported", len(written))
+        return written
+
     def export_ready(self, row, prog) -> None:
         """Export every approved page not exported yet; finish the PDF when all pages are done."""
         pdf = Path(row["final_path"] or row["path"])
         pid = row["ss_project"]
         scans = json.loads(row["ss_scans"] or "[]")
-        ss = self.scansplitter()
         if any(not s.get("exported") for s in scans):
             try:
                 self.send_settings(pid)
@@ -247,7 +286,7 @@ class PdfChecker:
                 if "HTTP 404" not in str(exc):
                     raise
         try:
-            live = {s["id"]: s for s in ss.project(pid).get("scans", [])}
+            live = self.live_scans(pid)
         except ScanSplitterError as exc:
             if "HTTP 404" in str(exc):
                 self.save(Path(row["path"]), state="error", note=f"ScanSplitter project {pid} no longer exists")
@@ -255,14 +294,9 @@ class PdfChecker:
                 self.bump("errors")
                 return
             raise
-        images = self.tc.bucket_dir("images")
-        documents = self.tc.bucket_dir("documents")
-        try:
-            rel_parent = pdf.relative_to(documents).parent
-        except ValueError:
-            rel_parent = Path()
+        hold = self.approval == "project" and not self.project_complete(pid)
         for s in scans:
-            if s.get("exported"):
+            if s.get("exported") or hold:
                 continue
             scan = live.get(s["sid"])
             if scan is None:  # you deleted the page in ScanSplitter: nothing to export
@@ -273,33 +307,103 @@ class PdfChecker:
             if not scan.get("boxes"):
                 s["exported"], s["files"] = True, []
                 continue
-            photos = ss.export_scan(pid, s["sid"], tick=prog.set_extra)
-            out_dir = images / rel_parent
-            out_dir.mkdir(parents=True, exist_ok=True)
-            written = []
-            for n, (name, data) in enumerate(photos, 1):
-                ext = Path(name).suffix.lower() or ".jpg"
-                dest = free_name(out_dir / f"{pdf.stem}_p{s['page']:03d}_{n}{ext}")
-                with open(dest, "xb") as fh:
-                    fh.write(data)
-                    fh.flush()
-                    os.fsync(fh.fileno())
-                self.db.action(self.run_id, None, "pdf-photo-exported", str(pdf), str(dest), rule="pdf-check",
-                               detail=f"page {s['page']}, photo {n}, ScanSplitter project {pid}")
-                written.append(str(dest))
-            s["exported"], s["files"] = True, written
-            self.bump("photos-exported", len(written))
+            self.export_page(pdf, row, pid, s, prog)
             self.save(Path(row["path"]), ss_scans=scans)
         waiting = sum(1 for s in scans if not s.get("exported"))
         if waiting:
-            self.save(Path(row["path"]), ss_scans=scans, state="waiting-review",
-                      note=f"{waiting} page(s) waiting for review in ScanSplitter")
+            why = "waiting for every page in its project to be approved" if hold else "waiting for review in ScanSplitter"
+            self.save(Path(row["path"]), ss_scans=scans, state="waiting-review", note=f"{waiting} page(s) {why}")
             self.bump("pages-waiting-review", waiting)
             return
         dest = self.move(pdf, self.tc.sorted_dir / "excluded" / "pdf-source", "pdf-source", "all pages split",
                          flat=True)
         self.save(Path(row["path"]), ss_scans=scans, state="done", final_path=str(dest), note="all pages split")
         self.bump("pdfs-split")
+
+    # reprocess: pages approved again after they were exported
+    def exported_at(self, row, s: dict) -> datetime | None:
+        ts = s.get("exported_at")
+        files = [to_db(f) for f in s.get("files") or []]
+        if not ts and files:  # exported before 0.6.2: the time is in the action log
+            r = self.db.db.execute("SELECT MAX(ts) FROM actions WHERE action='pdf-photo-exported' AND to_path IN "
+                                   f"({','.join('?' * len(files))})", files).fetchone()
+            ts = r[0] if r else None
+        return parse_time(ts)
+
+    def reprocess(self, pid: str, dry_run: bool = False) -> dict:
+        """Re-export every page of a project approved again since it was exported. The earlier photos go to
+        sorted/excluded/pdf-reprocessed/."""
+        self.run_id = None if dry_run else self.db.start_run("pdf-reprocess")
+        status = "finished"
+        out_dir = self.tc.reports_dir / f"pdf-reprocess-{datetime.now(self.cfg.tz):%Y%m%d-%H%M%S}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        report = out_dir / ("pages-dry-run.csv" if dry_run else "pages.csv")
+        try:
+            rows = self.db.db.execute("SELECT * FROM pdf_checks WHERE ss_project=? AND verdict='photo-pages' "
+                                      "AND ss_scans IS NOT NULL ORDER BY id", (pid,)).fetchall()
+            if not rows:
+                raise RuntimeError(f"No PDFs recorded in ScanSplitter project {pid}")
+            live = self.live_scans(pid, fresh=True)
+            todo = []
+            for row in rows:
+                for s in json.loads(row["ss_scans"] or "[]"):
+                    if not s.get("exported") or not s.get("files"):
+                        continue
+                    scan = live.get(s["sid"])
+                    if scan is None or scan.get("status") not in ("approved", "auto_approved"):
+                        continue
+                    approved, exported = parse_time(scan.get("reviewed_at")), self.exported_at(row, s)
+                    if approved and (exported is None or approved > exported):
+                        todo.append((row, s, approved, exported))
+            say(f"Pages approved again since they were exported: {len(todo):,}")
+            with open(report, "w", newline="", encoding="utf-8") as fh, \
+                    Progress("Reprocess" + (" (dry run)" if dry_run else ""), total=len(todo), unit="pages") as prog:
+                w = csv.writer(fh)
+                w.writerow(["pdf", "page", "approved", "exported", "outcome", "old photos", "new photos"])
+                if not dry_run and todo:
+                    self.send_settings(pid)
+                for row, s, approved, exported in todo:
+                    pdf = Path(row["final_path"] or row["path"])
+                    prog.set_extra(f"{pdf.name} page {s['page']}")
+                    old = list(s.get("files") or [])
+                    outcome, new = "would re-export", []
+                    missing = [f for f in old if not os.path.exists(f)]
+                    if missing:
+                        outcome = "skipped: earlier photo(s) already moved on - " + "; ".join(missing)[:300]
+                        self.bump("skipped-photos-moved-on")
+                    elif not dry_run:
+                        for f in old:
+                            dest_dir = self.tc.sorted_dir / "excluded" / "pdf-reprocessed"
+                            dest_dir.mkdir(parents=True, exist_ok=True)
+                            dest = free_name(dest_dir / os.path.basename(f))
+                            sha = sha256_of(f)
+                            method = transfer(f, dest, sha, self.tc.verify)
+                            self.db.action(self.run_id, None, "pdf-photo-replaced", f, str(dest), rule="pdf-reprocess",
+                                           sha_before=sha, sha_after=sha,
+                                           detail=f"{method}; page {s['page']} approved again {approved:%Y-%m-%d %H:%M}")
+                        new = self.export_page(pdf, row, pid, s, prog)
+                        scans = json.loads(self.db.db.execute("SELECT ss_scans FROM pdf_checks WHERE id=?",
+                                                              (row["id"],)).fetchone()[0])
+                        for x in scans:
+                            if x["sid"] == s["sid"]:
+                                x.update(s)
+                        self.save(Path(row["path"]), ss_scans=scans)
+                        outcome = "re-exported"
+                        self.bump("pages-re-exported")
+                    else:
+                        self.bump("pages-to-re-export")
+                    w.writerow([pdf.name, s["page"], approved.isoformat(), exported.isoformat() if exported else "",
+                                outcome, "; ".join(old), "; ".join(new)])
+                    prog.update()
+        except KeyboardInterrupt:
+            status = "interrupted"
+            say("Stopped. Pages finished so far are kept; run it again to carry on.")
+        finally:
+            if self.run_id is not None:
+                self.db.finish_run(self.run_id, status, self.stats)
+            self.db.close()
+        say(f"Report: {report}")
+        return {"status": status, "stats": dict(self.stats), "report": str(report)}
 
     # phase 2: new PDFs
     def todo(self) -> list[Path]:
@@ -394,7 +498,7 @@ class PdfChecker:
             return
         # photo pages: approve the pages ScanSplitter is sure about, then export what's approved
         entries = []
-        auto = (self.ss_cfg.approval if self.ss_cfg else "auto") == "auto"
+        auto = self.approval == "auto"
         for page_no, scan in sorted(scans.items()):
             if auto and scan.get("boxes") and not scan.get("flags"):
                 ss.approve(project, scan["id"])
@@ -499,6 +603,52 @@ class PdfChecker:
                     say(f"ScanSplitter project {pid} was left empty, so it was deleted.")
             except ScanSplitterError:
                 pass
+
+
+def parse_time(value) -> datetime | None:
+    """An ISO time (ScanSplitter's ...Z or ImagePipe's +10:00) as an aware datetime."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        from datetime import timezone
+
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def run_reprocess(cfg, project: str, dry_run: bool = False) -> dict:
+    return PdfChecker(cfg).reprocess(project, dry_run)
+
+
+def projects(cfg) -> list[dict]:
+    """ScanSplitter projects ImagePipe made, with PDF and page counts (and names when ScanSplitter answers)."""
+    c = PdfChecker(cfg)
+    try:
+        rows = c.db.db.execute("SELECT ss_project, ss_scans, state FROM pdf_checks WHERE ss_project IS NOT NULL "
+                               "AND verdict='photo-pages'").fetchall()
+    finally:
+        c.db.close()
+    out: dict[str, dict] = {}
+    for r in rows:
+        p = out.setdefault(r["ss_project"], {"id": r["ss_project"], "name": "", "pdfs": 0, "pages": 0, "waiting": 0})
+        scans = json.loads(r["ss_scans"] or "[]")
+        p["pdfs"] += 1
+        p["pages"] += len(scans)
+        p["waiting"] += sum(1 for s in scans if not s.get("exported"))
+    try:
+        ss = ScanSplitter(cfg.tools.scansplitter.url if cfg.tools else "", timeout=10)
+        listed = ss._call("GET", "/api/projects")
+        names = {p.get("id"): p.get("name", "") for p in (listed if isinstance(listed, list) else
+                                                           listed.get("projects", []))}
+        for p in out.values():
+            p["name"] = names.get(p["id"], "(not found in ScanSplitter)")
+    except (ScanSplitterError, AttributeError):
+        pass
+    return sorted(out.values(), key=lambda p: p["name"] or p["id"])
 
 
 def summary(pages: list[dict]) -> str:

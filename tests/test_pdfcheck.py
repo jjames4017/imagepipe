@@ -81,6 +81,8 @@ class FakeSS(BaseHTTPRequestHandler):
         p = self.path.split("?")[0]
         if p == "/api/health":
             return self._send(200, {"status": "ok"})
+        if p == "/api/projects":
+            return self._send(200, {"projects": [{"id": k, "name": v["name"]} for k, v in self.projects.items()]})
         m = re.match(r"^/api/projects/([^/]+)$", p)
         if m:
             proj = self.projects.get(m.group(1))
@@ -138,6 +140,9 @@ class FakeSS(BaseHTTPRequestHandler):
         m = re.match(r"^/api/projects/([^/]+)/scans/([^/]+)$", self.path)
         scan = next(s for s in self.projects[m.group(1)]["scans"] if s["id"] == m.group(2))
         scan["status"] = body["status"]
+        from datetime import datetime, timezone
+
+        scan["reviewed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         self._send(200, scan)
 
     def do_DELETE(self):
@@ -324,3 +329,50 @@ def test_approval_review_mode(setup):
     assert not (stack / "sorted/images").exists()             # nothing exported until you approve it
     scan = next(iter(FakeSS.projects.values()))["scans"][0]
     assert scan["status"] == "needs_review"
+
+
+@needs_tools
+def test_approval_whole_project(setup):
+    cfg, docs, stack = setup
+    cfg.tools.scansplitter.approval = "project"
+    for n in range(2):
+        (docs / f"album{n}.pdf").write_bytes(image_pdf(1))
+        FakeSS.plan[f"album{n}.pdf"] = [([(900, 900)], [])]
+    pdfcheck.run_pdf_check(cfg)
+    images = stack / "sorted/images/box1"
+    proj = next(iter(FakeSS.projects.values()))
+    assert all(s["status"] == "needs_review" for s in proj["scans"])   # nothing approved by ImagePipe
+    proj["scans"][0]["status"] = "approved"
+    pdfcheck.run_pdf_check(cfg)
+    assert not images.exists()                                          # one page still waiting: nothing out
+    proj["scans"][1]["status"] = "approved"
+    res = pdfcheck.run_pdf_check(cfg)
+    assert res["stats"]["pdfs-split"] == 2 and len(list(images.iterdir())) == 2
+
+
+@needs_tools
+def test_reprocess_project(setup):
+    cfg, docs, stack = setup
+    (docs / "album.pdf").write_bytes(image_pdf(2))
+    FakeSS.plan = {"album.pdf": [([(900, 900)], []), ([(900, 900)], [])]}
+    pdfcheck.run_pdf_check(cfg)                       # auto: both pages exported, PDF to pdf-source
+    pid, proj = next(iter(FakeSS.projects.items()))
+    listed = pdfcheck.projects(cfg)
+    assert listed[0]["id"] == pid and listed[0]["pages"] == 2 and listed[0]["name"].startswith("ImagePipe PDF check")
+    images = stack / "sorted/images/box1"
+    old = sorted(p.name for p in images.iterdir())
+    assert old == ["album_p001_1.jpg", "album_p002_1.jpg"]
+    # you fix page 2 and approve it again, after the export
+    import time
+    from datetime import datetime, timedelta, timezone
+
+    time.sleep(1.1)
+    proj["scans"][1]["reviewed_at"] = (datetime.now(timezone.utc) + timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    time.sleep(2.1)
+    dry = pdfcheck.run_reprocess(cfg, pid, dry_run=True)
+    assert dry["stats"] == {"pages-to-re-export": 1}
+    res = pdfcheck.run_reprocess(cfg, pid)
+    assert res["stats"]["pages-re-exported"] == 1
+    assert (stack / "sorted/excluded/pdf-reprocessed/album_p002_1.jpg").exists()
+    assert sorted(p.name for p in images.iterdir()) == ["album_p001_1.jpg", "album_p002_1.jpg"]
+    assert pdfcheck.run_reprocess(cfg, pid, dry_run=True)["stats"] == {}   # exported_at now after approval
