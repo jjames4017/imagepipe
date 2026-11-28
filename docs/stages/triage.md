@@ -488,14 +488,22 @@ Which copy is kept:
 1. a copy already processed: the keeper from an earlier run, then a PDF already
    split, then a PDF waiting for review in ScanSplitter
 2. the copy in the most meaningful folder. Each folder of the original path
-   scores +1 if its name says something (`Whakapapa`, `Bali 2014`), 0 if it is
-   generic (`DCIM`, `Documents`, `New folder` ..., plus the **extra generic
-   folder names** setting), -2 if it holds a word from the **backup / temporary
-   folder words** setting (whole words in any case: `PhotoTemp` is Photo + Temp,
-   so `temp` matches; `Golden Bay` doesn't match `old`). A file taken out of an
-   archive scores -2 more. Both lists are in Settings > Triage; add to them when
-   you find more
+   scores 0 if it matches **Duplicates: ignore words** (`*` wildcards, the whole
+   folder name: `onedrive*`, `USBDrive*`) or is generic (`DCIM`, `Documents`,
+   `New folder` ...); -2 if it holds a word from **Duplicates: backup /
+   temporary folder words** (whole words: `PhotoTemp` is Photo + Temp, so `temp`
+   matches; `Golden Bay` doesn't match `old`); +1 otherwise. Ignore words are
+   checked first. A file taken out of an archive scores -2 more.
+   **Duplicates: ignore upper/lower case in words** (on by default) decides
+   whether case matters. All are in Settings > Triage; add to the lists when you
+   find more. More meaningful folders score higher, so the copy in the more
+   organised (usually deeper) folder tree wins
 3. the oldest: the date triage found for the file, then its modified time
+
+**Duplicates: categories not checked** (default `web-pages`, `code`,
+`software`) are left alone: their files only work together with the files
+around them (a saved page's `_files` folder, a code project, an installed
+program).
 
 Companion files (sidecars, Live Photo clips) aren't compared on their own; they
 belong to their main file. A duplicate's companions move beside the kept file

@@ -9,9 +9,12 @@ Which copy is kept:
 1. a copy already processed: the keeper from an earlier run, then a PDF already split,
    then a PDF waiting for review in ScanSplitter
 2. the copy in the most meaningful folder: each folder of its original path scores
-   +1 if it says something ("Whakapapa", "Bali 2014"), 0 if generic (DCIM, Documents,
-   New folder ..., plus `dedupe_generic_folders`), -2 if it holds a backup/temporary word
-   (`dedupe_backup_words`); a file taken out of an archive scores -2 more
+   0 if it matches `dedupe_ignore_words` (wildcards) or is generic (DCIM, Documents,
+   New folder ...), -2 if it holds a backup/temporary word (`dedupe_backup_words`),
+   +1 otherwise ("Whakapapa", "Bali 2014"); a file taken out of an archive scores -2 more.
+   `dedupe_case_insensitive` decides whether case matters in both word lists.
+
+Categories in `dedupe_skip_categories` (default web-pages, code, software) are left alone.
 3. the oldest: the date triage found for the file, then the file's modified time
 
 Companion files (sidecars, Live Photo clips) belong to their main file and aren't compared
@@ -28,6 +31,7 @@ Only identical files are found: the same document saved or scanned twice is not.
 from __future__ import annotations
 
 import csv
+import fnmatch
 import json
 import logging
 import os
@@ -59,12 +63,23 @@ def tokens(name: str) -> list[str]:
 
 
 class Scorer:
-    def __init__(self, backup_words, generic_extra):
-        self.backup = [tokens(w) or [w.lower()] for w in backup_words]
-        self.generic = {g.strip().lower() for g in generic_extra}
+    def __init__(self, backup_words, ignore_words, case_insensitive: bool = True):
+        self.ci = case_insensitive
+        self.backup = [self._tokens(w) or [self._norm(w)] for w in backup_words]
+        self.ignore = [self._norm(w.strip()) for w in ignore_words if w.strip()]
+
+    def _norm(self, s: str) -> str:
+        return s.lower() if self.ci else s
+
+    def _tokens(self, name: str) -> list[str]:
+        return [self._norm(t) for t in _TOKEN.findall(name)]
+
+    def is_ignored(self, folder: str) -> bool:
+        name = self._norm(folder.strip())
+        return any(fnmatch.fnmatchcase(name, pat) for pat in self.ignore)
 
     def is_backup(self, folder: str) -> bool:
-        toks = tokens(folder)
+        toks = self._tokens(folder)
         joined = "".join(toks)
         for w in self.backup:
             n = len(w)
@@ -75,9 +90,11 @@ class Scorer:
         return False
 
     def folder(self, folder: str) -> int:
+        if self.is_ignored(folder):
+            return 0
         if self.is_backup(folder):
             return -2
-        if folder.strip().lower() in self.generic or meaningful_folder(folder) is None:
+        if meaningful_folder(folder) is None:
             return 0
         return 1
 
@@ -97,7 +114,8 @@ class Deduper:
     def __init__(self, cfg, dry_run: bool = False):
         self.cfg, self.tc, self.dry = cfg, cfg.triage, dry_run
         self.t = tdb.TriageDB(self.tc.database, cfg.tz, None if dry_run else self.tc.reports_dir / "actions.csv")
-        self.scorer = Scorer(self.tc.dedupe_backup_words, self.tc.dedupe_generic_folders)
+        self.scorer = Scorer(self.tc.dedupe_backup_words, self.tc.dedupe_ignore_words, self.tc.dedupe_case_insensitive)
+        self.skip = set(self.tc.dedupe_skip_categories)
         self.run_id = None
         self.stats: dict[str, int] = defaultdict(int)
         self.ss = None
@@ -115,6 +133,8 @@ class Deduper:
         by_sha = defaultdict(list)
         with Progress("Check copies are there", total=len(rows), unit="files") as prog:
             for r in rows:
+                if r["bucket"] in self.skip:
+                    continue
                 if r["id"] not in done and r["dest_path"] and os.path.lexists(r["dest_path"]):
                     by_sha[r["sha256"]].append(r)
                 prog.update()

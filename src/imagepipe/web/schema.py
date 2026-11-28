@@ -61,7 +61,7 @@ TRIAGE = [
          {"key": "path", "type": "path", "label": "Path"},
          {"key": "exclude", "type": "list", "label": "Exclude patterns", "optional": True},
      ]},
-    {"key": "categories", "type": "categories", "label": "Categories", "choices": list(PIPELINES),
+    {"key": "categories", "type": "categories", "label": "Triage Categories", "choices": list(PIPELINES),
      "default": DEFAULT_CATEGORIES,
      "help": "Each category is a folder under <filestack>/sorted/. Extensions decide the category (content "
              "checks for empty, corrupt or encrypted files come first). Pipeline: which pipeline picks the "
@@ -77,12 +77,18 @@ TRIAGE = [
     {"key": "max_archive_depth", "type": "int", "label": "Archives inside archives, depth", "default": 5},
     {"key": "max_extract_bytes", "type": "size", "label": "Largest unpacked archive", "default": "200GB"},
     {"key": "smartname_max_length", "type": "int", "label": "Smartname length", "default": 80},
+    {"key": "dedupe_skip_categories", "type": "list", "label": "Duplicates: categories not checked",
+     "default": ["web-pages", "code", "software"],
+     "help": "Remove duplicates leaves these triage categories alone (files that only work together with the "
+             "files around them: saved web pages, code, installed software)"},
     {"key": "dedupe_backup_words", "type": "list", "label": "Duplicates: backup / temporary folder words",
-     "help": "Remove duplicates: a folder whose name contains one of these words (whole words, any case; "
-             "PhotoTemp counts as Photo + Temp) scores -2, so a copy there is the one taken out"},
-    {"key": "dedupe_generic_folders", "type": "list", "label": "Duplicates: extra generic folder names",
-     "help": "Folder names that say nothing (score 0), on top of the built-in ones (DCIM, Camera, Documents, "
-             "New folder ...). Any other folder name scores +1"},
+     "help": "A folder whose name contains one of these words lowers that copy's chance of being kept (-2). "
+             "Whole words: PhotoTemp counts as Photo + Temp, so 'temp' matches; 'Golden Bay' doesn't match 'old'"},
+    {"key": "dedupe_ignore_words", "type": "list", "label": "Duplicates: ignore words (score 0)",
+     "help": "Folder names that neither help nor hurt a copy's chance of being kept, e.g. onedrive*, USBDrive*, "
+             "SPDrive*. * matches any characters; the whole folder name must match. Checked before the backup words"},
+    {"key": "dedupe_case_insensitive", "type": "bool", "label": "Duplicates: ignore upper/lower case in words",
+     "default": True, "help": "On: 'backup' matches Backup and BACKUP. Off: words match only as written"},
     {"key": "pdf_text_words", "type": "int", "label": "PDF check: words that make a document", "default": 7,
      "help": "Triage: check PDFs. A PDF with any page holding more words than this (text layer, or OCR when the "
              "text layer has fewer) is a document and never goes to ScanSplitter. A word is 2 or more letters/digits"},

@@ -45,6 +45,9 @@ DEFAULT_BACKUP_WORDS = ("backup", "backups", "temp", "tmp", "copy", "copies", "o
                         "download", "downloads", "drive_backup", "phototemp")
 
 
+DEFAULT_DEDUPE_SKIP = ("web-pages", "code", "software")
+
+
 @dataclass
 class TriageConfig:
     database: Path
@@ -65,7 +68,9 @@ class TriageConfig:
     # Duplicates: folder words that mark a backup/temporary copy (-2 each), and extra generic
     # folder names (0) on top of the built-in ones. Any other folder name scores +1.
     dedupe_backup_words: list = field(default_factory=lambda: list(DEFAULT_BACKUP_WORDS))
-    dedupe_generic_folders: list = field(default_factory=list)
+    dedupe_ignore_words: list = field(default_factory=list)     # folder names (with * wildcards) that score 0
+    dedupe_case_insensitive: bool = True
+    dedupe_skip_categories: list = field(default_factory=lambda: list(DEFAULT_DEDUPE_SKIP))
     categories: dict[str, dict] = field(default_factory=dict)  # name -> {pipeline, extensions}
     overrides: dict[str, str] = field(default_factory=dict)    # ext -> bucket, where it differs from the defaults
     legacy_destinations: dict[str, Path] = field(default_factory=dict)
@@ -100,7 +105,9 @@ class TriageConfig:
 KNOWN = {
     "database", "log_dir", "reports_dir", "sources", "workers", "verify", "categories",
     "embed_metadata", "reverse_geocode", "day_first", "live_photo_max_bytes", "max_archive_depth",
-    "max_extract_bytes", "smartname_max_length", "pdf_text_words", "dedupe_backup_words", "dedupe_generic_folders",
+    "max_extract_bytes", "smartname_max_length", "pdf_text_words", "dedupe_backup_words", "dedupe_ignore_words",
+    "dedupe_generic_folders",  # 0.6.0-0.6.2 name of dedupe_ignore_words
+    "dedupe_case_insensitive", "dedupe_skip_categories",
     "pdf_photo_coverage", "pdf_text_chars",  # 0.5.0-0.5.1 PDF check settings: accepted, no longer used
     # before 0.4: kept so `imagepipe triage relocate` knows where files were; not used otherwise
     "destinations", "work_dir", "bucket_overrides",
@@ -175,7 +182,11 @@ def parse_triage(data: dict | None) -> TriageConfig | None:
         smartname_max_length=int(data.get("smartname_max_length", 80)),
         pdf_text_words=int(data.get("pdf_text_words", 7)),
         dedupe_backup_words=_word_list(data.get("dedupe_backup_words"), DEFAULT_BACKUP_WORDS, "dedupe_backup_words"),
-        dedupe_generic_folders=_word_list(data.get("dedupe_generic_folders"), (), "dedupe_generic_folders"),
+        dedupe_ignore_words=_word_list(data.get("dedupe_ignore_words", data.get("dedupe_generic_folders")), (),
+                                       "dedupe_ignore_words"),
+        dedupe_case_insensitive=bool(data.get("dedupe_case_insensitive", True)),
+        dedupe_skip_categories=_word_list(data.get("dedupe_skip_categories"), DEFAULT_DEDUPE_SKIP,
+                                          "dedupe_skip_categories"),
         categories=categories,
         overrides=overrides,
         legacy_destinations=legacy_destinations,
