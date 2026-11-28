@@ -64,6 +64,8 @@ folder named after the source:
 | `imagepipe triage export-csv` | Every file in the triage database, one CSV | No |
 | `imagepipe triage dedupe --dry-run` | Finds identical files and writes the report of what would happen | No |
 | `imagepipe triage dedupe` | Keeps one copy of each set of identical files - see [Remove duplicates](#remove-duplicates) | **Yes - moves files** |
+| `imagepipe triage pdf-projects` | The ScanSplitter projects Check PDFs made, with PDF/page counts | No |
+| `imagepipe triage reprocess-pdfs --project ID [--dry-run]` | Re-exports pages approved again since they were exported - see [Reprocess](#reprocess-a-pdf-project) | **Yes - moves and writes photos** |
 | `imagepipe triage check-pdfs [--limit N]` | Sorts the PDFs in `sorted/documents` - see [Check PDFs](#check-pdfs) | **Yes - moves PDFs, writes photos** |
 | `imagepipe triage relocate [--dry-run]` | Moves files sorted before 0.4 from the old folders into the filestack | **Yes - moves files** |
 
@@ -454,7 +456,9 @@ bundle, processed master, album folders or manifest is ever asked for.
 With **Approval** set to `auto` (Settings > External tools > ScanSplitter, the
 default), pages ScanSplitter raised no CHECK flag for are approved by ImagePipe
 and their photos exported straight away to `sorted/images/` (same folders as the PDF,
-named `<PDF name>_p<page>_<n>.jpg`). With `review`, every page waits for you.
+named `<PDF name>_p<page>_<n>.jpg`). With `review`, every page waits for you. With `project`, every page waits for
+you **and nothing from a project is exported until every page in it is
+approved**; the next run then exports the whole project.
 Pages with a CHECK flag always wait for you in ScanSplitter's Projects page: fix the boxes and approve them there (or delete a
 page to skip it). Every later run exports the pages you approved. When all
 pages of a PDF are done the PDF moves to `sorted/excluded/pdf-source/`.
@@ -508,3 +512,21 @@ triage database, `actions.csv`, and `dedupe-<time>/duplicates.csv` with each
 copy's score, date, original place and outcome). Only identical files are found:
 the same document saved or scanned twice is not, and ImagePipe's own duplicate
 checks still run later.
+
+## Reprocess a PDF project
+
+Pages you change and approve again in ScanSplitter after ImagePipe exported them
+are not picked up by Check PDFs (an exported page is finished for it).
+**Reprocess** does that, one project at a time: Run tab > Triage card > PDFs >
+**Load projects**, pick the project, then **Reprocess (dry run)** to see which
+pages would be done, and **Reprocess** to do it (`imagepipe triage
+reprocess-pdfs --project ID [--dry-run]`; `imagepipe triage pdf-projects` lists
+the ids).
+
+A page is reprocessed when ScanSplitter shows it approved later than ImagePipe
+exported it - every page approved again, whether or not its boxes changed. Its
+earlier photos move to `sorted/excluded/pdf-reprocessed/` (nothing is
+overwritten or deleted) and the page is exported again to the same folder in
+`sorted/images`. A page whose earlier photos have already moved on (into
+ImagePipe) is skipped and listed. Every move is in `actions.csv`; each run writes
+`pdf-reprocess-<time>/pages.csv`.

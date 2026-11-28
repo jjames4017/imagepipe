@@ -45,7 +45,9 @@ class ScanSplitterTool:
     quality: int = 100
     include_gps: bool = False
     max_pdfs_per_project: int = 200          # a run starts a new project when one holds this many photo PDFs
-    approval: str = "auto"                   # auto: pages without a CHECK flag approved by ImagePipe; review: you
+    approval: str = "auto"                   # auto: no-CHECK pages approved by ImagePipe; review: you approve
+                                             # every page; project: you approve every page, and nothing from a
+                                             # project is exported until all its pages are approved
 
     def project_settings(self) -> dict:
         """The settings dict for ScanSplitter's PATCH /api/projects/{pid}."""
@@ -61,7 +63,7 @@ SS_DETECTION = ("scansplitterv7", "scansplitterv5", "scansplitterv4", "scansplit
 SS_LAYOUT = ("auto", "single", "spread")
 SS_EDGE = ("off", "conservative", "tight")
 SS_FORMAT = ("jpeg", "png")
-SS_APPROVAL = ("auto", "review")
+SS_APPROVAL = ("auto", "review", "project")
 
 
 def _bool(name: str, v) -> bool:

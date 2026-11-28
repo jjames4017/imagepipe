@@ -84,7 +84,8 @@ triage:
 #     quality: 100
 #     include_gps: false
 #     max_pdfs_per_project: 200
-#     approval: auto                    # auto: no-CHECK pages approved by ImagePipe; review: you approve every page
+#     approval: auto                    # auto: no-CHECK pages approved by ImagePipe; review: you approve every page;
+#                                       # project: you approve every page, a project is exported only when all are
 #   photoprism:   {url: http://<host>:2342, username: admin, password: ""}
 #   immich:       {url: http://<host>:2283, api_key: ""}
 #   a_eye:        {url: http://<host>:8000, username: "", password: ""}
