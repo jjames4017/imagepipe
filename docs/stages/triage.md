@@ -451,8 +451,9 @@ colour, 2x upscale, format, JPEG quality, GPS); projects made earlier get them
 before ImagePipe exports from them. Defaults: scansplitterv7, auto, 2 % / 100 %,
 auto-rotate on, tight, deskew/restore/upscale on, JPEG 100, no GPS. No archive
 bundle, processed master, album folders or manifest is ever asked for.
-Pages ScanSplitter raised no CHECK flag for are approved by ImagePipe and their
-photos exported straight away to `sorted/images/` (same folders as the PDF,
+With **Approval** set to `auto` (Settings > External tools > ScanSplitter, the
+default), pages ScanSplitter raised no CHECK flag for are approved by ImagePipe
+and their photos exported straight away to `sorted/images/` (same folders as the PDF,
 named `<PDF name>_p<page>_<n>.jpg`). Pages with a CHECK flag wait for you in
 ScanSplitter's Projects page: fix the boxes and approve them there (or delete a
 page to skip it). Every later run exports the pages you approved. When all
